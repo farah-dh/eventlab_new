@@ -1,0 +1,846 @@
+<script setup lang="ts">
+import { useGenerateImageVariant } from '@core/composable/useGenerateImageVariant'
+import authV2LoginIllustrationBorderedDark from '@images/pages/auth-v2-login-illustration-bordered-dark.png'
+import authV2LoginIllustrationBorderedLight from '@images/pages/auth-v2-login-illustration-bordered-light.png'
+import authV2LoginIllustrationDark from '@images/pages/auth-v2-login-illustration-dark.png'
+import authV2LoginIllustrationLight from '@images/pages/auth-v2-login-illustration-light.png'
+import authV2MaskDark from '@images/pages/misc-mask-dark.png'
+import authV2MaskLight from '@images/pages/misc-mask-light.png'
+import { VNodeRenderer } from '@layouts/components/VNodeRenderer'
+import { themeConfig } from '@themeConfig'
+import { computed, ref } from 'vue'
+
+definePage({
+  meta: {
+    layout: 'blank',
+    public: true,
+  },
+})
+
+const router = useRouter()
+
+const selectedRole = ref<'user' | 'organizer'>('user')
+const activeView = ref<'login' | 'register' | 'register-organizer'>('login')
+
+const roleConfig = computed(() => {
+  if (selectedRole.value === 'organizer') {
+    return {
+      title: 'Espace Organisateur',
+      subtitle: 'Gérez vos événements et suivez vos performances',
+      emoji: '🏢',
+      color: '#7C3AED',
+      colorLight: '#EDE9FE',
+      btnText: 'Accéder à mon espace',
+      badge: 'Créez et gérez vos événements, suivez vos ventes et votre audience.',
+      badgeBg: '#EDE9FE',
+      badgeColor: '#5B21B6',
+      icon: 'tabler-building',
+    }
+  }
+  return {
+    title: 'Bienvenue sur',
+    subtitle: 'Connectez-vous à votre compte pour continuer',
+    emoji: '👋🏻',
+    color: '#E91E63',
+    colorLight: '#FCE4EC',
+    btnText: 'Se connecter',
+    badge: 'Accédez à votre tableau de bord utilisateur ou administrateur.',
+    badgeBg: '#FCE4EC',
+    badgeColor: '#880E4F',
+    icon: 'tabler-user',
+  }
+})
+
+const form = ref({ email: '', password: '', remember: false })
+const isPasswordVisible = ref(false)
+const errorMessage = ref('')
+const isLoading = ref(false)
+
+const registerForm = ref({
+  firstname: '',
+  lastname: '',
+  username: '',
+  email: '',
+  password: '',
+  password_confirm: '',
+})
+const registerError = ref('')
+const registerSuccess = ref('')
+const isRegisterLoading = ref(false)
+const isRegPasswordVisible = ref(false)
+const isRegPasswordConfirmVisible = ref(false)
+
+const orgForm = ref({
+  organization_name: '',
+  firstname: '',
+  lastname: '',
+  username: '',
+  email: '',
+  mobile: '',
+  dial_code: '+216',
+  country_code: 'TN',
+  password: '',
+  password_confirm: '',
+})
+const orgError = ref('')
+const orgSuccess = ref('')
+const isOrgLoading = ref(false)
+const isOrgPasswordVisible = ref(false)
+const isOrgPasswordConfirmVisible = ref(false)
+
+const authThemeImg = useGenerateImageVariant(
+  authV2LoginIllustrationLight,
+  authV2LoginIllustrationDark,
+  authV2LoginIllustrationBorderedLight,
+  authV2LoginIllustrationBorderedDark,
+  true)
+const authThemeMask = useGenerateImageVariant(authV2MaskLight, authV2MaskDark)
+
+const loginUser = async () => {
+  errorMessage.value = ''
+  isLoading.value = true
+  try {
+    const response = await fetch('http://127.0.0.1:8001/api/v1/auth/login/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: form.value.email, password: form.value.password }),
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      errorMessage.value = data.detail || data.message || 'Email ou mot de passe incorrect'
+      return
+    }
+    localStorage.setItem('access_token', data.access)
+    localStorage.setItem('refresh_token', data.refresh)
+    localStorage.setItem('user', JSON.stringify(data.user))
+    const payload = JSON.parse(atob(data.access.split('.')[1]))
+    if (payload.is_staff) {
+      localStorage.setItem('user_role', 'admin')
+      router.push('/admin/dashboard')
+    }
+    else {
+      localStorage.setItem('user_role', 'user')
+      router.push('/user/dashboard')
+    }
+  }
+  catch {
+    errorMessage.value = 'Erreur de connexion au serveur'
+  }
+  finally {
+    isLoading.value = false
+  }
+}
+
+const loginOrganizer = async () => {
+  errorMessage.value = ''
+  isLoading.value = true
+  try {
+    const response = await fetch('http://127.0.0.1:8001/api/v1/auth/organizer-login/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: form.value.email, password: form.value.password }),
+    })
+    const data = await response.json()
+    if (!response.ok || !data.status) {
+      errorMessage.value = data.message || 'Email ou mot de passe incorrect'
+      return
+    }
+    localStorage.setItem('organizer_token', data.data.access)
+    localStorage.setItem('organizer_refresh', data.data.refresh)
+    localStorage.setItem('organizer', JSON.stringify(data.data.organizer))
+    localStorage.setItem('user_role', 'organizer')
+    router.push('/organizer/dashboard')
+  }
+  catch {
+    errorMessage.value = 'Erreur de connexion au serveur'
+  }
+  finally {
+    isLoading.value = false
+  }
+}
+
+const login = () => {
+  if (selectedRole.value === 'organizer')
+    loginOrganizer()
+  else
+    loginUser()
+}
+
+const register = async () => {
+  registerError.value = ''
+  registerSuccess.value = ''
+
+  if (!registerForm.value.firstname || !registerForm.value.email || !registerForm.value.password) {
+    registerError.value = 'Veuillez remplir tous les champs obligatoires'
+    return
+  }
+  if (registerForm.value.password !== registerForm.value.password_confirm) {
+    registerError.value = 'Les mots de passe ne correspondent pas'
+    return
+  }
+
+  isRegisterLoading.value = true
+  try {
+    const response = await fetch('http://127.0.0.1:8001/api/v1/auth/register/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        firstname: registerForm.value.firstname,
+        lastname: registerForm.value.lastname,
+        username: registerForm.value.username,
+        email: registerForm.value.email,
+        password: registerForm.value.password,
+        password_confirm: registerForm.value.password_confirm,
+      }),
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      const errors = data.errors || data
+      const firstKey = Object.keys(errors)[0]
+      const firstVal = errors[firstKey]
+      registerError.value = Array.isArray(firstVal) ? firstVal[0] : (data.message || "Erreur lors de l'inscription")
+      return
+    }
+    registerSuccess.value = 'Compte créé avec succès ! Vous pouvez maintenant vous connecter.'
+    setTimeout(() => {
+      activeView.value = 'login'
+      selectedRole.value = 'user'
+      registerForm.value = { firstname: '', lastname: '', username: '', email: '', password: '', password_confirm: '' }
+      registerSuccess.value = ''
+    }, 2000)
+  }
+  catch {
+    registerError.value = 'Erreur de connexion au serveur'
+  }
+  finally {
+    isRegisterLoading.value = false
+  }
+}
+
+const registerOrganizer = async () => {
+  orgError.value = ''
+  orgSuccess.value = ''
+
+  if (orgForm.value.password !== orgForm.value.password_confirm) {
+    orgError.value = 'Les mots de passe ne correspondent pas'
+    return
+  }
+
+  isOrgLoading.value = true
+  try {
+    const response = await fetch('http://127.0.0.1:8001/api/v1/organizers/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(orgForm.value),
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      const errors = data.errors || data
+      const firstKey = Object.keys(errors)[0]
+      const firstVal = errors[firstKey]
+      orgError.value = Array.isArray(firstVal) ? firstVal[0] : (data.message || "Erreur lors de l'inscription")
+      return
+    }
+    orgSuccess.value = 'Compte organisateur créé ! Vous pouvez maintenant vous connecter.'
+    setTimeout(() => {
+      activeView.value = 'login'
+      selectedRole.value = 'organizer'
+      orgForm.value = {
+        organization_name: '', firstname: '', lastname: '', username: '',
+        email: '', mobile: '', dial_code: '+216', country_code: 'TN',
+        password: '', password_confirm: '',
+      }
+      orgSuccess.value = ''
+    }, 2500)
+  }
+  catch {
+    orgError.value = 'Erreur de connexion au serveur'
+  }
+  finally {
+    isOrgLoading.value = false
+  }
+}
+
+const goToRegisterUser = () => { activeView.value = 'register' }
+const goToRegisterOrg = () => { activeView.value = 'register-organizer' }
+const goToLoginUser = () => { activeView.value = 'login'; selectedRole.value = 'user' }
+const goToLoginOrg = () => { activeView.value = 'login'; selectedRole.value = 'organizer' }
+</script>
+
+<template>
+  <div class="auth-wrapper-v2">
+    <a href="javascript:void(0)" class="auth-logo-link">
+      <div class="auth-logo d-flex align-center gap-x-3">
+        <VNodeRenderer :nodes="themeConfig.app.logo" />
+        <h1 class="auth-title">{{ themeConfig.app.title }}</h1>
+      </div>
+    </a>
+
+    <VRow no-gutters class="auth-wrapper">
+
+      <VCol md="7" class="d-none d-md-flex auth-illustration-wrapper">
+        <div class="illustration-bg">
+          <div class="deco-circle deco-circle-1"></div>
+          <div class="deco-circle deco-circle-2"></div>
+          <div class="deco-circle deco-circle-3"></div>
+
+          <div class="d-flex flex-column align-center justify-center w-100 h-100 position-relative" style="z-index: 2;">
+            <div class="text-center mb-8 px-6" style="max-inline-size: 500px;">
+              <h2 class="text-h3 font-weight-bold mb-3" style="color: #1A1A2E; line-height: 1.2;">
+                Bienvenue sur
+                <span style="color: #E91E63;">EventLab</span> 🎉
+              </h2>
+              <p class="text-body-1" style="color: #6B7280;">
+                La plateforme tunisienne de réservation d'événements.
+                <br>Découvrez, réservez et vivez des expériences inoubliables.
+              </p>
+            </div>
+
+            <VImg :src="authThemeImg" class="auth-illustration-img" max-width="420" contain />
+          </div>
+
+          <img
+            class="auth-footer-mask flip-in-rtl"
+            :src="authThemeMask"
+            alt="auth-footer-mask"
+            height="180"
+            width="100"
+          >
+        </div>
+      </VCol>
+
+      <VCol cols="12" md="5" class="auth-form-col d-flex align-center justify-center">
+        <VCard flat :max-width="460" class="pa-6 pa-md-8 w-100 form-card">
+
+          <!-- VUE : LOGIN -->
+          <div v-if="activeView === 'login'">
+            <div class="text-center mb-6">
+              <div class="role-icon-wrapper mb-4" :style="{ background: roleConfig.color }">
+                <VIcon icon="tabler-ticket" size="28" color="white" />
+              </div>
+              <h4 class="text-h4 font-weight-bold mb-2" style="color: #1A1A2E;">
+                <span v-if="selectedRole === 'user'">
+                  {{ roleConfig.title }}
+                  <span class="text-capitalize" :style="{ color: roleConfig.color }">{{ themeConfig.app.title }}</span>
+                  {{ roleConfig.emoji }}
+                </span>
+                <span v-else>{{ roleConfig.title }} {{ roleConfig.emoji }}</span>
+              </h4>
+              <p class="text-body-2 text-medium-emphasis mb-0">{{ roleConfig.subtitle }}</p>
+            </div>
+
+            <VForm @submit.prevent="login">
+              <p class="text-caption font-weight-semibold text-medium-emphasis mb-3 text-uppercase" style="letter-spacing: 0.5px;">
+                Type de compte
+              </p>
+              <div class="d-flex gap-3 mb-4">
+                <div
+                  class="role-card flex-1"
+                  :class="{ 'role-card-active-user': selectedRole === 'user' }"
+                  @click="selectedRole = 'user'"
+                >
+                  <div class="role-card-icon" :class="{ active: selectedRole === 'user' }">
+                    <VIcon icon="tabler-user" size="22" :color="selectedRole === 'user' ? 'white' : '#9CA3AF'" />
+                  </div>
+                  <div>
+                    <p class="text-body-2 font-weight-bold mb-0" :style="{ color: selectedRole === 'user' ? '#E91E63' : '#1A1A2E' }">
+                      Utilisateur
+                    </p>
+                    <p class="text-caption mb-0" style="color: #9CA3AF;">ou Admin</p>
+                  </div>
+                  <VIcon
+                    v-if="selectedRole === 'user'"
+                    icon="tabler-circle-check-filled"
+                    size="18"
+                    color="#E91E63"
+                    class="role-card-check"
+                  />
+                </div>
+
+                <div
+                  class="role-card flex-1"
+                  :class="{ 'role-card-active-org': selectedRole === 'organizer' }"
+                  @click="selectedRole = 'organizer'"
+                >
+                  <div class="role-card-icon" :class="{ 'active-org': selectedRole === 'organizer' }">
+                    <VIcon icon="tabler-building" size="22" :color="selectedRole === 'organizer' ? 'white' : '#9CA3AF'" />
+                  </div>
+                  <div>
+                    <p class="text-body-2 font-weight-bold mb-0" :style="{ color: selectedRole === 'organizer' ? '#7C3AED' : '#1A1A2E' }">
+                      Organisateur
+                    </p>
+                    <p class="text-caption mb-0" style="color: #9CA3AF;">events</p>
+                  </div>
+                  <VIcon
+                    v-if="selectedRole === 'organizer'"
+                    icon="tabler-circle-check-filled"
+                    size="18"
+                    color="#7C3AED"
+                    class="role-card-check"
+                  />
+                </div>
+              </div>
+
+              <div class="info-badge mb-4" :style="{ background: roleConfig.badgeBg }">
+                <VIcon icon="tabler-info-circle" size="16" :color="roleConfig.badgeColor" />
+                <span class="text-caption" :style="{ color: roleConfig.badgeColor }">{{ roleConfig.badge }}</span>
+              </div>
+
+              <VAlert v-if="errorMessage" type="error" variant="tonal" density="compact" class="mb-4">
+                {{ errorMessage }}
+              </VAlert>
+
+              <div class="mb-4">
+                <label class="text-caption font-weight-semibold mb-1 d-block">Email</label>
+                <AppTextField
+                  v-model="form.email"
+                  autofocus
+                  type="email"
+                  placeholder="votre@email.com"
+                  prepend-inner-icon="tabler-mail"
+                />
+              </div>
+
+              <div class="mb-3">
+                <label class="text-caption font-weight-semibold mb-1 d-block">Mot de passe</label>
+                <AppTextField
+                  v-model="form.password"
+                  placeholder="············"
+                  :type="isPasswordVisible ? 'text' : 'password'"
+                  prepend-inner-icon="tabler-lock"
+                  :append-inner-icon="isPasswordVisible ? 'tabler-eye-off' : 'tabler-eye'"
+                  @click:append-inner="isPasswordVisible = !isPasswordVisible"
+                />
+              </div>
+
+              <div class="d-flex align-center justify-space-between mb-6">
+                <VCheckbox v-model="form.remember" label="Se souvenir de moi" density="compact" hide-details />
+              </div>
+
+              <VBtn
+                block
+                type="submit"
+                size="large"
+                :loading="isLoading"
+                class="submit-btn"
+                :style="{ background: roleConfig.color, color: 'white' }"
+              >
+                <VIcon start :icon="roleConfig.icon" size="18" />
+                {{ roleConfig.btnText }}
+              </VBtn>
+
+              <div class="text-center mt-5">
+                <template v-if="selectedRole === 'user'">
+                  <span class="text-body-2 text-medium-emphasis">Pas encore de compte ? </span>
+                  
+                    href="javascript:void(0)"
+                    class="text-body-2 font-weight-semibold register-link"
+                    style="color: #E91E63;"
+                    @click="goToRegisterUser"
+                  >Créer un compte</a>
+                </template>
+                <template v-else>
+                  <span class="text-body-2 text-medium-emphasis">Pas encore organisateur ? </span>
+                  
+                    href="javascript:void(0)"
+                    class="text-body-2 font-weight-semibold register-link"
+                    style="color: #7C3AED;"
+                    @click="goToRegisterOrg"
+                  >Créer un compte</a>
+                </template>
+              </div>
+            </VForm>
+          </div>
+
+          <!-- VUE : INSCRIPTION USER -->
+          <div v-else-if="activeView === 'register'">
+            <div class="text-center mb-6">
+              <div class="role-icon-wrapper mb-4" style="background: #E91E63;">
+                <VIcon icon="tabler-user-plus" size="28" color="white" />
+              </div>
+              <h4 class="text-h4 font-weight-bold mb-2" style="color: #1A1A2E;">Créer un compte</h4>
+              <p class="text-body-2 text-medium-emphasis mb-0">
+                Rejoignez EventLab et accédez aux meilleurs événements
+              </p>
+            </div>
+
+            <VForm @submit.prevent="register">
+              <VAlert v-if="registerError" type="error" variant="tonal" density="compact" class="mb-4">
+                {{ registerError }}
+              </VAlert>
+              <VAlert v-if="registerSuccess" type="success" variant="tonal" density="compact" class="mb-4">
+                {{ registerSuccess }}
+              </VAlert>
+
+              <VRow>
+                <VCol cols="6">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Prénom *</label>
+                  <AppTextField v-model="registerForm.firstname" placeholder="Farah" prepend-inner-icon="tabler-user" />
+                </VCol>
+                <VCol cols="6">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Nom</label>
+                  <AppTextField v-model="registerForm.lastname" placeholder="Dupont" prepend-inner-icon="tabler-user" />
+                </VCol>
+                <VCol cols="12">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Nom d'utilisateur *</label>
+                  <AppTextField v-model="registerForm.username" placeholder="farah_dh" prepend-inner-icon="tabler-at" />
+                </VCol>
+                <VCol cols="12">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Email *</label>
+                  <AppTextField v-model="registerForm.email" type="email" placeholder="farah@exemple.com" prepend-inner-icon="tabler-mail" />
+                </VCol>
+                <VCol cols="12">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Mot de passe *</label>
+                  <AppTextField
+                    v-model="registerForm.password"
+                    placeholder="············"
+                    :type="isRegPasswordVisible ? 'text' : 'password'"
+                    prepend-inner-icon="tabler-lock"
+                    :append-inner-icon="isRegPasswordVisible ? 'tabler-eye-off' : 'tabler-eye'"
+                    @click:append-inner="isRegPasswordVisible = !isRegPasswordVisible"
+                  />
+                </VCol>
+                <VCol cols="12">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Confirmer le mot de passe *</label>
+                  <AppTextField
+                    v-model="registerForm.password_confirm"
+                    placeholder="············"
+                    :type="isRegPasswordConfirmVisible ? 'text' : 'password'"
+                    prepend-inner-icon="tabler-lock-check"
+                    :append-inner-icon="isRegPasswordConfirmVisible ? 'tabler-eye-off' : 'tabler-eye'"
+                    @click:append-inner="isRegPasswordConfirmVisible = !isRegPasswordConfirmVisible"
+                  />
+                </VCol>
+                <VCol cols="12">
+                  <VBtn
+                    block
+                    type="submit"
+                    size="large"
+                    :loading="isRegisterLoading"
+                    class="submit-btn"
+                    style="background: #E91E63; color: white;"
+                  >
+                    <VIcon start icon="tabler-user-plus" size="18" />
+                    Créer mon compte
+                  </VBtn>
+                  <div class="text-center mt-4">
+                    <span class="text-body-2 text-medium-emphasis">Déjà un compte ? </span>
+                    
+                      href="javascript:void(0)"
+                      class="text-body-2 font-weight-semibold"
+                      style="color: #E91E63;"
+                      @click="goToLoginUser"
+                    >Se connecter</a>
+                  </div>
+                </VCol>
+              </VRow>
+            </VForm>
+          </div>
+
+          <!-- VUE : INSCRIPTION ORGANISATEUR -->
+          <div v-else-if="activeView === 'register-organizer'">
+            <div class="text-center mb-6">
+              <div class="role-icon-wrapper mb-4" style="background: #7C3AED;">
+                <VIcon icon="tabler-building-plus" size="28" color="white" />
+              </div>
+              <h4 class="text-h4 font-weight-bold mb-2" style="color: #1A1A2E;">Compte organisateur</h4>
+              <p class="text-body-2 text-medium-emphasis mb-0">
+                Rejoignez EventLab et gérez vos événements
+              </p>
+            </div>
+
+            <VForm @submit.prevent="registerOrganizer">
+              <VAlert v-if="orgError" type="error" variant="tonal" density="compact" class="mb-4">
+                {{ orgError }}
+              </VAlert>
+              <VAlert v-if="orgSuccess" type="success" variant="tonal" density="compact" class="mb-4">
+                {{ orgSuccess }}
+              </VAlert>
+
+              <VRow>
+                <VCol cols="12">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Nom de l'organisation *</label>
+                  <AppTextField v-model="orgForm.organization_name" placeholder="EventLab Tunisia" prepend-inner-icon="tabler-building" />
+                </VCol>
+                <VCol cols="6">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Prénom</label>
+                  <AppTextField v-model="orgForm.firstname" placeholder="Farah" prepend-inner-icon="tabler-user" />
+                </VCol>
+                <VCol cols="6">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Nom</label>
+                  <AppTextField v-model="orgForm.lastname" placeholder="Dupont" prepend-inner-icon="tabler-user" />
+                </VCol>
+                <VCol cols="12">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Nom d'utilisateur *</label>
+                  <AppTextField v-model="orgForm.username" placeholder="farah_org" prepend-inner-icon="tabler-at" />
+                </VCol>
+                <VCol cols="12">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Email *</label>
+                  <AppTextField v-model="orgForm.email" type="email" placeholder="contact@organisation.com" prepend-inner-icon="tabler-mail" />
+                </VCol>
+                <VCol cols="4">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Indicatif</label>
+                  <AppTextField v-model="orgForm.dial_code" placeholder="+216" />
+                </VCol>
+                <VCol cols="8">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Téléphone</label>
+                  <AppTextField v-model="orgForm.mobile" placeholder="58271569" prepend-inner-icon="tabler-phone" />
+                </VCol>
+                <VCol cols="12">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Code pays</label>
+                  <AppTextField v-model="orgForm.country_code" placeholder="TN" prepend-inner-icon="tabler-map-pin" />
+                </VCol>
+                <VCol cols="12">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Mot de passe *</label>
+                  <AppTextField
+                    v-model="orgForm.password"
+                    placeholder="············"
+                    :type="isOrgPasswordVisible ? 'text' : 'password'"
+                    prepend-inner-icon="tabler-lock"
+                    :append-inner-icon="isOrgPasswordVisible ? 'tabler-eye-off' : 'tabler-eye'"
+                    @click:append-inner="isOrgPasswordVisible = !isOrgPasswordVisible"
+                  />
+                </VCol>
+                <VCol cols="12">
+                  <label class="text-caption font-weight-semibold mb-1 d-block">Confirmer le mot de passe *</label>
+                  <AppTextField
+                    v-model="orgForm.password_confirm"
+                    placeholder="············"
+                    :type="isOrgPasswordConfirmVisible ? 'text' : 'password'"
+                    prepend-inner-icon="tabler-lock-check"
+                    :append-inner-icon="isOrgPasswordConfirmVisible ? 'tabler-eye-off' : 'tabler-eye'"
+                    @click:append-inner="isOrgPasswordConfirmVisible = !isOrgPasswordConfirmVisible"
+                  />
+                </VCol>
+                <VCol cols="12">
+                  <VBtn
+                    block
+                    type="submit"
+                    size="large"
+                    :loading="isOrgLoading"
+                    class="submit-btn"
+                    style="background: #7C3AED; color: white;"
+                  >
+                    <VIcon start icon="tabler-building-plus" size="18" />
+                    Créer mon compte
+                  </VBtn>
+                  <div class="text-center mt-4">
+                    <span class="text-body-2 text-medium-emphasis">Déjà un compte ? </span>
+                    
+                      href="javascript:void(0)"
+                      class="text-body-2 font-weight-semibold"
+                      style="color: #7C3AED;"
+                      @click="goToLoginOrg"
+                    >Se connecter</a>
+                  </div>
+                </VCol>
+              </VRow>
+            </VForm>
+          </div>
+
+        </VCard>
+      </VCol>
+    </VRow>
+  </div>
+</template>
+
+<style lang="scss" scoped>
+.auth-wrapper-v2 {
+  position: relative;
+  min-block-size: 100vh;
+  overflow: hidden;
+}
+
+.auth-logo-link {
+  position: absolute;
+  inset-block-start: 1.5rem;
+  inset-inline-start: 1.5rem;
+  z-index: 10;
+  text-decoration: none;
+}
+
+.auth-logo h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1A1A2E;
+  margin: 0;
+}
+
+.auth-wrapper {
+  min-block-size: 100vh;
+}
+
+.auth-illustration-wrapper {
+  position: relative;
+}
+
+.illustration-bg {
+  position: relative;
+  inline-size: 100%;
+  background: linear-gradient(135deg, #FFF5F8 0%, #FFE4EC 50%, #FCE4EC 100%);
+  overflow: hidden;
+}
+
+.deco-circle {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0.4;
+  z-index: 1;
+}
+
+.deco-circle-1 {
+  inline-size: 300px;
+  block-size: 300px;
+  background: radial-gradient(circle, #F8BBD0 0%, transparent 70%);
+  inset-block-start: -100px;
+  inset-inline-start: -100px;
+}
+
+.deco-circle-2 {
+  inline-size: 250px;
+  block-size: 250px;
+  background: radial-gradient(circle, #F48FB1 0%, transparent 70%);
+  inset-block-end: 100px;
+  inset-inline-end: -80px;
+}
+
+.deco-circle-3 {
+  inline-size: 180px;
+  block-size: 180px;
+  background: radial-gradient(circle, #EC407A 0%, transparent 70%);
+  opacity: 0.2;
+  inset-block-start: 40%;
+  inset-inline-start: 10%;
+}
+
+.auth-illustration-img {
+  filter: drop-shadow(0 25px 50px rgba(233, 30, 99, 0.15));
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-15px); }
+}
+
+.auth-footer-mask {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  block-size: 180px;
+  inline-size: 100%;
+  opacity: 0.4;
+  z-index: 1;
+}
+
+.auth-form-col {
+  background: #FFFFFF;
+  min-block-size: 100vh;
+}
+
+.form-card {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.role-icon-wrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 64px;
+  block-size: 64px;
+  border-radius: 20px;
+  box-shadow: 0 10px 25px rgba(233, 30, 99, 0.25);
+  transition: all 0.3s ease;
+}
+
+.role-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem;
+  border: 2px solid #E5E7EB;
+  border-radius: 12px;
+  background: #FFFFFF;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  position: relative;
+  user-select: none;
+}
+
+.role-card:hover {
+  border-color: #D1D5DB;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.role-card-active-user {
+  border-color: #E91E63 !important;
+  background: #FDF2F8 !important;
+  box-shadow: 0 4px 12px rgba(233, 30, 99, 0.15) !important;
+}
+
+.role-card-active-org {
+  border-color: #7C3AED !important;
+  background: #F5F3FF !important;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.15) !important;
+}
+
+.role-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: 10px;
+  background: #F3F4F6;
+  transition: all 0.25s ease;
+  flex-shrink: 0;
+}
+
+.role-card-icon.active {
+  background: #E91E63;
+}
+
+.role-card-icon.active-org {
+  background: #7C3AED;
+}
+
+.role-card-check {
+  position: absolute;
+  inset-block-start: 8px;
+  inset-inline-end: 8px;
+}
+
+.info-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 10px;
+}
+
+.submit-btn {
+  block-size: 48px !important;
+  border-radius: 10px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.3px !important;
+  text-transform: none !important;
+  transition: all 0.25s ease !important;
+}
+
+.register-link {
+  text-decoration: none;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+@media (max-inline-size: 960px) {
+  .auth-form-col {
+    min-block-size: auto;
+    padding-block-start: 5rem;
+  }
+}
+</style>
