@@ -1,3 +1,5 @@
+from django.core.mail import send_mail
+from django.conf import settings
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
@@ -32,6 +34,42 @@ class LocationViewSet(viewsets.ModelViewSet):
     search_fields = ["name"]
 
 
+def _send_event_created_email(event):
+    """Send a confirmation email to the organizer when their event is created."""
+    try:
+        organizer   = event.organizer
+        location    = getattr(event, "location", None)
+        location_name = location.name if location else event.location_address or "N/A"
+        price       = f"{event.price} DT" if event.price else "Gratuit"
+        seats       = str(event.seats) if event.seats else "Illimité"
+        start       = event.start_date.strftime("%d/%m/%Y") if event.start_date else "N/A"
+        end         = event.end_date.strftime("%d/%m/%Y") if event.end_date else "N/A"
+
+        send_mail(
+            subject=f"✅ Votre événement « {event.title} » a été créé",
+            message=(
+                f"Bonjour {organizer.organization_name},\n\n"
+                f"Votre événement a été créé avec succès sur EventFlow !\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📌 Titre      : {event.title}\n"
+                f"📅 Début      : {start}\n"
+                f"📅 Fin        : {end}\n"
+                f"📍 Lieu       : {location_name}\n"
+                f"💰 Prix       : {price}\n"
+                f"🎫 Places     : {seats}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Vous pouvez gérer votre événement depuis votre tableau de bord.\n\n"
+                f"L'équipe EventFlow"
+            ),
+            from_email=settings.EMAIL_HOST_USER,
+            recipient_list=[organizer.email],
+            fail_silently=True,
+        )
+    except Exception as e:
+        # Ne bloque jamais la création de l'événement
+        print(f"[EventFlow] Event creation email failed: {e}")
+
+
 class EventViewSet(viewsets.ModelViewSet):
     queryset = Event.objects.select_related(
         "organizer", "category", "location"
@@ -64,13 +102,16 @@ class EventViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        # Try to get the organizer profile for this user
         try:
             from apps.accounts.models import Organizer
             organizer = Organizer.objects.get(email=self.request.user.email)
         except Exception:
             raise Exception("You must be an organizer to create events.")
-        serializer.save(organizer=organizer)
+
+        event = serializer.save(organizer=organizer)
+
+        # ── Email de confirmation à l'organisateur ─────────────────────────
+        _send_event_created_email(event)
 
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def save_event(self, request, pk=None):
