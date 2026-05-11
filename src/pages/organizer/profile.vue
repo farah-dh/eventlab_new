@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
+import { useAuthStore } from '@/stores/auth'
 
 definePage({
   meta: {
     layout: 'organizer',
   },
 })
+
+const authStore = useAuthStore()
 
 // ── Config API ────────────────────────────────────────────────────────────────
 const API = 'http://127.0.0.1:8001/api/v1'
@@ -79,6 +82,15 @@ const userInitials = computed(() => {
   return 'O'
 })
 
+// ── 2FA State ─────────────────────────────────────────────────────────────────
+const twoFAEnabled  = ref(false)
+const twoFAStep     = ref<'idle' | 'confirm'>('idle')
+const twoFAOtp      = ref('')
+const twoFALoading  = ref(false)
+const twoFASuccess  = ref('')
+const twoFAError    = ref('')
+const twoFAAction   = ref<'enable' | 'disable'>('enable')
+
 // ── Fetch profile ─────────────────────────────────────────────────────────────
 const fetchProfile = async () => {
   isLoading.value = true
@@ -104,6 +116,75 @@ const fetchProfile = async () => {
   finally { isLoading.value = false }
 }
 
+// ── Fetch 2FA status ──────────────────────────────────────────────────────────
+const fetch2FAStatus = async () => {
+  const res = await authStore.getOrganizer2FAStatus()
+  twoFAEnabled.value = res.enabled
+}
+
+// ── Toggle 2FA (étape 1 : demande OTP) ───────────────────────────────────────
+const request2FAToggle = async () => {
+  if (twoFALoading.value) return          // ← bloque les doubles clics
+  if (twoFAStep.value === 'confirm') return // ← déjà en attente d'OTP
+
+  twoFAError.value   = ''
+  twoFASuccess.value = ''
+  twoFALoading.value = true
+  twoFAOtp.value     = ''
+
+  if (!twoFAEnabled.value) {
+    twoFAAction.value = 'enable'
+    const res = await authStore.enableOrganizer2FA()
+    if (res.success) { twoFAStep.value = 'confirm' }
+    else { twoFAError.value = res.message || "Erreur lors de l'envoi du code." }
+  } else {
+    twoFAAction.value = 'disable'
+    const res = await authStore.disableOrganizer2FA()
+    if (res.success) { twoFAStep.value = 'confirm' }
+    else { twoFAError.value = res.message || "Erreur lors de l'envoi du code." }
+  }
+  twoFALoading.value = false
+}
+
+// ── OTP input : chiffres uniquement, max 6 ───────────────────────────────────
+const onOtpInput = (e: Event) => {
+  const val = (e.target as HTMLInputElement).value
+  twoFAOtp.value = val.replace(/\D/g, '').slice(0, 6)
+}
+
+// ── Confirmer OTP (étape 2) ───────────────────────────────────────────────────
+const confirm2FA = async () => {
+  if (twoFALoading.value) return
+  if (!twoFAOtp.value || twoFAOtp.value.length < 6) {
+    twoFAError.value = 'Veuillez entrer le code à 6 chiffres.'
+    return
+  }
+  twoFALoading.value = true
+  twoFAError.value   = ''
+
+  const res = twoFAAction.value === 'enable'
+    ? await authStore.confirmEnableOrganizer2FA(twoFAOtp.value)
+    : await authStore.disableOrganizer2FA(twoFAOtp.value)
+
+  if (res.success) {
+    twoFAEnabled.value = twoFAAction.value === 'enable'
+    twoFAStep.value    = 'idle'
+    twoFAOtp.value     = ''
+    twoFASuccess.value = twoFAAction.value === 'enable' ? '2FA activée avec succès !' : '2FA désactivée.'
+    setTimeout(() => twoFASuccess.value = '', 4000)
+  } else {
+    twoFAError.value = res.message || 'Code incorrect.'
+  }
+  twoFALoading.value = false
+}
+
+// ── Annuler la saisie OTP ─────────────────────────────────────────────────────
+const cancel2FA = () => {
+  twoFAStep.value  = 'idle'
+  twoFAOtp.value   = ''
+  twoFAError.value = ''
+}
+
 // ── Save profile ──────────────────────────────────────────────────────────────
 const saveProfile = async () => {
   isSaving.value = true
@@ -115,7 +196,6 @@ const saveProfile = async () => {
       method: 'PATCH',
       body: JSON.stringify(form.value),
     })
-    // Update localStorage
     const stored = JSON.parse(localStorage.getItem('organizer') || '{}')
     localStorage.setItem('organizer', JSON.stringify({ ...stored, ...data }))
     successMsg.value = 'Profil mis à jour avec succès !'
@@ -192,23 +272,18 @@ const pwdStrength = computed(() => {
   return score
 })
 
-const pwdStrengthLabel = computed(() => {
-  const labels = ['', 'Faible', 'Moyen', 'Bon', 'Fort']
-  return labels[pwdStrength.value] || ''
-})
+const pwdStrengthLabel = computed(() => ['', 'Faible', 'Moyen', 'Bon', 'Fort'][pwdStrength.value] || '')
+const pwdStrengthColor = computed(() => ['', '#EF4444', '#F59E0B', '#10B981', '#059669'][pwdStrength.value] || '')
 
-const pwdStrengthColor = computed(() => {
-  const colors = ['', '#EF4444', '#F59E0B', '#10B981', '#059669']
-  return colors[pwdStrength.value] || ''
+onMounted(async () => {
+  await fetchProfile()
+  await fetch2FAStatus()
 })
-
-onMounted(fetchProfile)
 </script>
 
 <template>
   <div class="profile-page">
 
-    <!-- ── Header ─────────────────────────────────────────────────────────── -->
     <div class="page-header">
       <div>
         <h2 class="page-title">Mon profil</h2>
@@ -216,14 +291,13 @@ onMounted(fetchProfile)
       </div>
     </div>
 
-    <!-- ── Loading ────────────────────────────────────────────────────────── -->
     <div v-if="isLoading" class="center-pad">
       <VProgressCircular indeterminate color="primary" size="36" />
     </div>
 
     <div v-else class="profile-layout">
 
-      <!-- ── Colonne gauche : Avatar + infos rapides ─────────────────────── -->
+      <!-- ── Sidebar ─────────────────────────────────────────────────────── -->
       <div class="sidebar-col">
         <div class="avatar-card">
           <div class="avatar-wrap">
@@ -236,283 +310,199 @@ onMounted(fetchProfile)
               <input type="file" accept="image/*" class="d-none" @change="handleAvatarChange">
             </label>
           </div>
-
           <h3 class="avatar-name">{{ form.firstname }} {{ form.lastname }}</h3>
           <p class="avatar-org">{{ form.organization_name }}</p>
           <p class="avatar-email">{{ form.email }}</p>
-
           <div v-if="avatarFile" class="mt-3">
-            <VBtn
-              color="primary"
-              size="small"
-              block
-              :loading="isUploadAvatar"
-              @click="uploadAvatar"
-            >
-              <VIcon start icon="tabler-upload" size="14" />
-              Enregistrer la photo
+            <VBtn color="primary" size="small" block :loading="isUploadAvatar" @click="uploadAvatar">
+              <VIcon start icon="tabler-upload" size="14" />Enregistrer la photo
             </VBtn>
           </div>
-
-          <!-- KYC status -->
           <div class="kyc-badge" :class="profile.kyc_status === 'approved' ? 'kyc-approved' : profile.kyc_status === 'pending' ? 'kyc-pending' : 'kyc-none'">
-            <VIcon
-              :icon="profile.kyc_status === 'approved' ? 'tabler-shield-check' : profile.kyc_status === 'pending' ? 'tabler-shield-half' : 'tabler-shield-x'"
-              size="14"
-            />
-            KYC :
-            {{ profile.kyc_status === 'approved' ? 'Approuvé' : profile.kyc_status === 'pending' ? 'En attente' : 'Non soumis' }}
+            <VIcon :icon="profile.kyc_status === 'approved' ? 'tabler-shield-check' : profile.kyc_status === 'pending' ? 'tabler-shield-half' : 'tabler-shield-x'" size="14" />
+            KYC : {{ profile.kyc_status === 'approved' ? 'Approuvé' : profile.kyc_status === 'pending' ? 'En attente' : 'Non soumis' }}
           </div>
         </div>
 
-        <!-- Navigation tabs verticale -->
         <div class="side-nav">
           <button :class="['snav-item', { active: activeTab === 'info' }]" @click="activeTab = 'info'">
-            <VIcon icon="tabler-user" size="15" />
-            Informations
+            <VIcon icon="tabler-user" size="15" />Informations
           </button>
           <button :class="['snav-item', { active: activeTab === 'org' }]" @click="activeTab = 'org'">
-            <VIcon icon="tabler-building" size="15" />
-            Organisation
+            <VIcon icon="tabler-building" size="15" />Organisation
           </button>
           <button :class="['snav-item', { active: activeTab === 'security' }]" @click="activeTab = 'security'">
-            <VIcon icon="tabler-lock" size="15" />
-            Sécurité
+            <VIcon icon="tabler-lock" size="15" />Sécurité
           </button>
         </div>
       </div>
 
-      <!-- ── Colonne droite : Formulaires ───────────────────────────────── -->
+      <!-- ── Content ────────────────────────────────────────────────────── -->
       <div class="content-col">
 
-        <!-- Alertes globales -->
-        <VAlert v-if="successMsg" type="success" variant="tonal" density="compact" class="mb-4" closable @click:close="successMsg = ''">
-          {{ successMsg }}
-        </VAlert>
-        <VAlert v-if="errorMsg" type="error" variant="tonal" density="compact" class="mb-4" closable @click:close="errorMsg = ''">
-          {{ errorMsg }}
-        </VAlert>
+        <VAlert v-if="successMsg" type="success" variant="tonal" density="compact" class="mb-4" closable @click:close="successMsg = ''">{{ successMsg }}</VAlert>
+        <VAlert v-if="errorMsg"   type="error"   variant="tonal" density="compact" class="mb-4" closable @click:close="errorMsg = ''">{{ errorMsg }}</VAlert>
 
-        <!-- ── Tab: Informations personnelles ─────────────────────────── -->
+        <!-- Tab: Informations ──────────────────────────────────────────── -->
         <div v-show="activeTab === 'info'" class="form-card">
           <div class="form-card-head">
             <VIcon icon="tabler-user" size="18" color="#4F46E5" />
-            <div>
-              <h3 class="form-card-title">Informations personnelles</h3>
-              <p class="form-card-sub">Vos coordonnées de contact</p>
-            </div>
+            <div><h3 class="form-card-title">Informations personnelles</h3><p class="form-card-sub">Vos coordonnées de contact</p></div>
           </div>
           <VDivider class="mb-5" />
-
           <VRow>
-            <VCol cols="12" md="6">
-              <AppTextField
-                v-model="form.firstname"
-                label="Prénom"
-                placeholder="Ahmed"
-                prepend-inner-icon="tabler-user"
-              />
-            </VCol>
-            <VCol cols="12" md="6">
-              <AppTextField
-                v-model="form.lastname"
-                label="Nom"
-                placeholder="Ben Ali"
-                prepend-inner-icon="tabler-user"
-              />
-            </VCol>
-            <VCol cols="12" md="6">
-              <AppTextField
-                v-model="form.email"
-                label="Email"
-                type="email"
-                placeholder="ahmed@eventlab.tn"
-                prepend-inner-icon="tabler-mail"
-              />
-            </VCol>
-            <VCol cols="12" md="6">
-              <AppTextField
-                v-model="form.phone"
-                label="Téléphone"
-                placeholder="+216 XX XXX XXX"
-                prepend-inner-icon="tabler-phone"
-              />
-            </VCol>
-            <VCol cols="12">
-              <AppTextField
-                v-model="form.address"
-                label="Adresse"
-                placeholder="Rue, Ville, Pays"
-                prepend-inner-icon="tabler-map-pin"
-              />
-            </VCol>
+            <VCol cols="12" md="6"><AppTextField v-model="form.firstname" label="Prénom" placeholder="Ahmed" prepend-inner-icon="tabler-user" /></VCol>
+            <VCol cols="12" md="6"><AppTextField v-model="form.lastname" label="Nom" placeholder="Ben Ali" prepend-inner-icon="tabler-user" /></VCol>
+            <VCol cols="12" md="6"><AppTextField v-model="form.email" label="Email" type="email" placeholder="ahmed@eventlab.tn" prepend-inner-icon="tabler-mail" /></VCol>
+            <VCol cols="12" md="6"><AppTextField v-model="form.phone" label="Téléphone" placeholder="+216 XX XXX XXX" prepend-inner-icon="tabler-phone" /></VCol>
+            <VCol cols="12"><AppTextField v-model="form.address" label="Adresse" placeholder="Rue, Ville, Pays" prepend-inner-icon="tabler-map-pin" /></VCol>
           </VRow>
-
           <div class="d-flex justify-end mt-4">
             <VBtn color="primary" :loading="isSaving" @click="saveProfile">
-              <VIcon start icon="tabler-device-floppy" size="15" />
-              Enregistrer
+              <VIcon start icon="tabler-device-floppy" size="15" />Enregistrer
             </VBtn>
           </div>
         </div>
 
-        <!-- ── Tab: Organisation ──────────────────────────────────────── -->
+        <!-- Tab: Organisation ──────────────────────────────────────────── -->
         <div v-show="activeTab === 'org'" class="form-card">
           <div class="form-card-head">
             <VIcon icon="tabler-building" size="18" color="#4F46E5" />
-            <div>
-              <h3 class="form-card-title">Mon organisation</h3>
-              <p class="form-card-sub">Informations de votre structure</p>
-            </div>
+            <div><h3 class="form-card-title">Mon organisation</h3><p class="form-card-sub">Informations de votre structure</p></div>
           </div>
           <VDivider class="mb-5" />
-
           <VRow>
-            <VCol cols="12">
-              <AppTextField
-                v-model="form.organization_name"
-                label="Nom de l'organisation"
-                placeholder="EventLab Tunisia"
-                prepend-inner-icon="tabler-building"
-              />
-            </VCol>
-            <VCol cols="12" md="6">
-              <AppTextField
-                v-model="form.website"
-                label="Site web"
-                placeholder="https://monsite.tn"
-                prepend-inner-icon="tabler-world"
-              />
-            </VCol>
-            <VCol cols="12" md="6">
-              <AppTextField
-                v-model="form.phone"
-                label="Téléphone professionnel"
-                placeholder="+216 XX XXX XXX"
-                prepend-inner-icon="tabler-phone"
-              />
-            </VCol>
-            <VCol cols="12">
-              <VTextarea
-                v-model="form.bio"
-                label="Description / Bio"
-                placeholder="Décrivez votre organisation..."
-                rows="4"
-                prepend-inner-icon="tabler-align-left"
-              />
-            </VCol>
+            <VCol cols="12"><AppTextField v-model="form.organization_name" label="Nom de l'organisation" placeholder="EventLab Tunisia" prepend-inner-icon="tabler-building" /></VCol>
+            <VCol cols="12" md="6"><AppTextField v-model="form.website" label="Site web" placeholder="https://monsite.tn" prepend-inner-icon="tabler-world" /></VCol>
+            <VCol cols="12" md="6"><AppTextField v-model="form.phone" label="Téléphone professionnel" placeholder="+216 XX XXX XXX" prepend-inner-icon="tabler-phone" /></VCol>
+            <VCol cols="12"><VTextarea v-model="form.bio" label="Description / Bio" placeholder="Décrivez votre organisation..." rows="4" prepend-inner-icon="tabler-align-left" /></VCol>
           </VRow>
-
           <div class="d-flex justify-end mt-4">
             <VBtn color="primary" :loading="isSaving" @click="saveProfile">
-              <VIcon start icon="tabler-device-floppy" size="15" />
-              Enregistrer
+              <VIcon start icon="tabler-device-floppy" size="15" />Enregistrer
             </VBtn>
           </div>
         </div>
 
-        <!-- ── Tab: Sécurité ──────────────────────────────────────────── -->
+        <!-- Tab: Sécurité ──────────────────────────────────────────────── -->
         <div v-show="activeTab === 'security'" class="form-card">
+
           <div class="form-card-head">
             <VIcon icon="tabler-lock" size="18" color="#4F46E5" />
-            <div>
-              <h3 class="form-card-title">Changer le mot de passe</h3>
-              <p class="form-card-sub">Assurez-vous d'utiliser un mot de passe fort</p>
-            </div>
+            <div><h3 class="form-card-title">Changer le mot de passe</h3><p class="form-card-sub">Assurez-vous d'utiliser un mot de passe fort</p></div>
           </div>
           <VDivider class="mb-5" />
 
-          <VAlert v-if="pwdSuccess" type="success" variant="tonal" density="compact" class="mb-4">
-            {{ pwdSuccess }}
-          </VAlert>
-          <VAlert v-if="pwdError" type="error" variant="tonal" density="compact" class="mb-4">
-            {{ pwdError }}
-          </VAlert>
+          <VAlert v-if="pwdSuccess" type="success" variant="tonal" density="compact" class="mb-4">{{ pwdSuccess }}</VAlert>
+          <VAlert v-if="pwdError"   type="error"   variant="tonal" density="compact" class="mb-4">{{ pwdError }}</VAlert>
 
           <VRow>
             <VCol cols="12">
-              <AppTextField
-                v-model="pwdForm.old_password"
-                label="Mot de passe actuel"
-                :type="showOldPwd ? 'text' : 'password'"
-                prepend-inner-icon="tabler-lock"
-                :append-inner-icon="showOldPwd ? 'tabler-eye-off' : 'tabler-eye'"
-                @click:append-inner="showOldPwd = !showOldPwd"
-              />
+              <AppTextField v-model="pwdForm.old_password" label="Mot de passe actuel" :type="showOldPwd ? 'text' : 'password'" prepend-inner-icon="tabler-lock" :append-inner-icon="showOldPwd ? 'tabler-eye-off' : 'tabler-eye'" @click:append-inner="showOldPwd = !showOldPwd" />
             </VCol>
             <VCol cols="12">
-              <AppTextField
-                v-model="pwdForm.new_password"
-                label="Nouveau mot de passe"
-                :type="showNewPwd ? 'text' : 'password'"
-                prepend-inner-icon="tabler-lock-plus"
-                :append-inner-icon="showNewPwd ? 'tabler-eye-off' : 'tabler-eye'"
-                @click:append-inner="showNewPwd = !showNewPwd"
-              />
-              <!-- Force du mot de passe -->
+              <AppTextField v-model="pwdForm.new_password" label="Nouveau mot de passe" :type="showNewPwd ? 'text' : 'password'" prepend-inner-icon="tabler-lock-plus" :append-inner-icon="showNewPwd ? 'tabler-eye-off' : 'tabler-eye'" @click:append-inner="showNewPwd = !showNewPwd" />
               <div v-if="pwdForm.new_password" class="pwd-strength">
                 <div class="strength-bars">
-                  <div
-                    v-for="i in 4"
-                    :key="i"
-                    class="bar"
-                    :style="{ background: i <= pwdStrength ? pwdStrengthColor : '#E5E7EB' }"
-                  />
+                  <div v-for="i in 4" :key="i" class="bar" :style="{ background: i <= pwdStrength ? pwdStrengthColor : '#E5E7EB' }" />
                 </div>
-                <span class="strength-label" :style="{ color: pwdStrengthColor }">
-                  {{ pwdStrengthLabel }}
-                </span>
+                <span class="strength-label" :style="{ color: pwdStrengthColor }">{{ pwdStrengthLabel }}</span>
               </div>
             </VCol>
             <VCol cols="12">
-              <AppTextField
-                v-model="pwdForm.confirm"
-                label="Confirmer le nouveau mot de passe"
-                :type="showConfPwd ? 'text' : 'password'"
-                prepend-inner-icon="tabler-lock-check"
-                :append-inner-icon="showConfPwd ? 'tabler-eye-off' : 'tabler-eye'"
-                @click:append-inner="showConfPwd = !showConfPwd"
-              />
-              <p
-                v-if="pwdForm.confirm && pwdForm.new_password !== pwdForm.confirm"
-                class="text-caption text-error mt-1"
-              >
-                Les mots de passe ne correspondent pas
-              </p>
+              <AppTextField v-model="pwdForm.confirm" label="Confirmer le nouveau mot de passe" :type="showConfPwd ? 'text' : 'password'" prepend-inner-icon="tabler-lock-check" :append-inner-icon="showConfPwd ? 'tabler-eye-off' : 'tabler-eye'" @click:append-inner="showConfPwd = !showConfPwd" />
+              <p v-if="pwdForm.confirm && pwdForm.new_password !== pwdForm.confirm" class="text-caption text-error mt-1">Les mots de passe ne correspondent pas</p>
             </VCol>
           </VRow>
 
-          <!-- Règles -->
           <div class="pwd-rules">
             <p class="rules-title">Règles du mot de passe :</p>
             <div class="rules-list">
-              <span :class="['rule', { 'rule-ok': pwdForm.new_password.length >= 8 }]">
-                <VIcon :icon="pwdForm.new_password.length >= 8 ? 'tabler-check' : 'tabler-x'" size="12" />
-                Minimum 8 caractères
-              </span>
-              <span :class="['rule', { 'rule-ok': /[A-Z]/.test(pwdForm.new_password) }]">
-                <VIcon :icon="/[A-Z]/.test(pwdForm.new_password) ? 'tabler-check' : 'tabler-x'" size="12" />
-                Une majuscule
-              </span>
-              <span :class="['rule', { 'rule-ok': /[0-9]/.test(pwdForm.new_password) }]">
-                <VIcon :icon="/[0-9]/.test(pwdForm.new_password) ? 'tabler-check' : 'tabler-x'" size="12" />
-                Un chiffre
-              </span>
-              <span :class="['rule', { 'rule-ok': /[^A-Za-z0-9]/.test(pwdForm.new_password) }]">
-                <VIcon :icon="/[^A-Za-z0-9]/.test(pwdForm.new_password) ? 'tabler-check' : 'tabler-x'" size="12" />
-                Un caractère spécial
-              </span>
+              <span :class="['rule', { 'rule-ok': pwdForm.new_password.length >= 8 }]"><VIcon :icon="pwdForm.new_password.length >= 8 ? 'tabler-check' : 'tabler-x'" size="12" /> Minimum 8 caractères</span>
+              <span :class="['rule', { 'rule-ok': /[A-Z]/.test(pwdForm.new_password) }]"><VIcon :icon="/[A-Z]/.test(pwdForm.new_password) ? 'tabler-check' : 'tabler-x'" size="12" /> Une majuscule</span>
+              <span :class="['rule', { 'rule-ok': /[0-9]/.test(pwdForm.new_password) }]"><VIcon :icon="/[0-9]/.test(pwdForm.new_password) ? 'tabler-check' : 'tabler-x'" size="12" /> Un chiffre</span>
+              <span :class="['rule', { 'rule-ok': /[^A-Za-z0-9]/.test(pwdForm.new_password) }]"><VIcon :icon="/[^A-Za-z0-9]/.test(pwdForm.new_password) ? 'tabler-check' : 'tabler-x'" size="12" /> Un caractère spécial</span>
             </div>
           </div>
 
           <div class="d-flex justify-end mt-4">
             <VBtn color="primary" :loading="isChangingPwd" @click="changePassword">
-              <VIcon start icon="tabler-lock" size="15" />
-              Changer le mot de passe
+              <VIcon start icon="tabler-lock" size="15" />Changer le mot de passe
             </VBtn>
           </div>
-        </div>
 
+          <!-- ── 2FA ───────────────────────────────────────────────────── -->
+          <VDivider class="my-6" />
+
+          <div class="form-card-head mb-4">
+            <VIcon icon="tabler-shield-lock" size="18" color="#4F46E5" />
+            <div><h3 class="form-card-title">Authentification à deux facteurs</h3><p class="form-card-sub">Ajoutez une couche de sécurité supplémentaire à votre compte</p></div>
+          </div>
+
+          <VAlert v-if="twoFASuccess" type="success" variant="tonal" density="compact" class="mb-4">{{ twoFASuccess }}</VAlert>
+          <VAlert v-if="twoFAError"   type="error"   variant="tonal" density="compact" class="mb-4">{{ twoFAError }}</VAlert>
+
+          <!-- Statut + bouton — caché pendant la saisie OTP -->
+          <div v-if="twoFAStep === 'idle'" class="twofa-row">
+            <div class="twofa-info">
+              <div class="twofa-status" :class="twoFAEnabled ? 'status-on' : 'status-off'">
+                <VIcon :icon="twoFAEnabled ? 'tabler-shield-check' : 'tabler-shield-off'" size="14" />
+                {{ twoFAEnabled ? 'Activée' : 'Désactivée' }}
+              </div>
+              <p class="twofa-desc">
+                {{ twoFAEnabled ? 'La 2FA est activée. Un code vous sera demandé à chaque connexion.' : 'Activez la 2FA pour recevoir un code par email à chaque connexion.' }}
+              </p>
+            </div>
+            <VBtn
+              :color="twoFAEnabled ? 'error' : 'primary'"
+              variant="tonal"
+              size="small"
+              :loading="twoFALoading"
+              :disabled="twoFALoading"
+              @click="request2FAToggle"
+            >
+              <VIcon start :icon="twoFAEnabled ? 'tabler-shield-off' : 'tabler-shield-lock'" size="14" />
+              {{ twoFAEnabled ? 'Désactiver la 2FA' : 'Activer la 2FA' }}
+            </VBtn>
+          </div>
+
+          <!-- Saisie OTP -->
+          <div v-if="twoFAStep === 'confirm'" class="twofa-confirm">
+            <div class="twofa-confirm-info">
+              <VIcon icon="tabler-mail" size="16" color="#4F46E5" />
+              <p>Un code à 6 chiffres a été envoyé à <strong>{{ form.email }}</strong>. Entrez-le pour confirmer.</p>
+            </div>
+            <div class="twofa-confirm-row">
+              <div class="otp-native-wrap">
+                <label class="otp-label">Code OTP</label>
+                <input
+                  :value="twoFAOtp"
+                  class="otp-native"
+                  type="text"
+                  inputmode="numeric"
+                  placeholder="123456"
+                  autocomplete="one-time-code"
+                  @input="onOtpInput"
+                  @keyup.enter="confirm2FA"
+                />
+              </div>
+              <div class="twofa-confirm-btns">
+                <VBtn
+                  color="primary"
+                  :loading="twoFALoading"
+                  :disabled="twoFALoading || twoFAOtp.length < 6"
+                  @click="confirm2FA"
+                >
+                  <VIcon start icon="tabler-check" size="14" />Confirmer
+                </VBtn>
+                <VBtn variant="text" color="secondary" :disabled="twoFALoading" @click="cancel2FA">
+                  Annuler
+                </VBtn>
+              </div>
+            </div>
+          </div>
+
+        </div>
       </div>
     </div>
   </div>
@@ -520,14 +510,11 @@ onMounted(fetchProfile)
 
 <style scoped lang="scss">
 .profile-page { display: flex; flex-direction: column; gap: 20px; }
+.page-header  { display: flex; align-items: flex-start; justify-content: space-between; }
+.page-title   { font-size: 20px; font-weight: 600; color: #111827; margin: 0 0 4px; }
+.page-sub     { font-size: 13px; color: #6B7280; margin: 0; }
+.center-pad   { display: flex; justify-content: center; padding: 48px; }
 
-.page-header { display: flex; align-items: flex-start; justify-content: space-between; }
-.page-title  { font-size: 20px; font-weight: 600; color: #111827; margin: 0 0 4px; }
-.page-sub    { font-size: 13px; color: #6B7280; margin: 0; }
-
-.center-pad  { display: flex; justify-content: center; padding: 48px; }
-
-// ── Layout ────────────────────────────────────────────────────────────────────
 .profile-layout {
   display: grid;
   grid-template-columns: 240px 1fr;
@@ -536,7 +523,6 @@ onMounted(fetchProfile)
   @media (max-width: 768px) { grid-template-columns: 1fr; }
 }
 
-// ── Sidebar col ───────────────────────────────────────────────────────────────
 .sidebar-col { display: flex; flex-direction: column; gap: 12px; }
 
 .avatar-card {
@@ -544,17 +530,10 @@ onMounted(fetchProfile)
   border-radius: 12px; padding: 24px 20px;
   display: flex; flex-direction: column; align-items: center; text-align: center;
 }
-
-.avatar-wrap { position: relative; margin-bottom: 14px; }
-.avatar-circle {
-  width: 80px; height: 80px; border-radius: 50%;
-  background: #4F46E5;
-  display: flex; align-items: center; justify-content: center;
-  overflow: hidden;
-}
+.avatar-wrap     { position: relative; margin-bottom: 14px; }
+.avatar-circle   { width: 80px; height: 80px; border-radius: 50%; background: #4F46E5; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .avatar-img      { width: 100%; height: 100%; object-fit: cover; }
 .avatar-initials { font-size: 28px; font-weight: 700; color: white; }
-
 .avatar-edit-btn {
   position: absolute; bottom: 0; right: 0;
   width: 26px; height: 26px; border-radius: 50%;
@@ -563,11 +542,9 @@ onMounted(fetchProfile)
   cursor: pointer; transition: background .15s;
   &:hover { background: #4338CA; }
 }
-
 .avatar-name  { font-size: 15px; font-weight: 600; color: #111827; margin: 0 0 3px; }
 .avatar-org   { font-size: 13px; color: #6B7280; margin: 0 0 2px; }
 .avatar-email { font-size: 12px; color: #9CA3AF; margin: 0; }
-
 .kyc-badge {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 4px 12px; border-radius: 20px;
@@ -579,7 +556,8 @@ onMounted(fetchProfile)
 
 .side-nav {
   background: white; border: 0.5px solid #E5E7EB;
-  border-radius: 12px; padding: 8px; display: flex; flex-direction: column; gap: 2px;
+  border-radius: 12px; padding: 8px;
+  display: flex; flex-direction: column; gap: 2px;
 }
 .snav-item {
   display: flex; align-items: center; gap: 10px;
@@ -590,38 +568,17 @@ onMounted(fetchProfile)
   &.active { background: #EEF2FF; color: #4F46E5; font-weight: 500; }
 }
 
-// ── Content col ───────────────────────────────────────────────────────────────
 .content-col { display: flex; flex-direction: column; gap: 0; }
-
-.form-card {
-  background: white; border: 0.5px solid #E5E7EB;
-  border-radius: 12px; padding: 24px;
-}
-.form-card-head {
-  display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;
-}
+.form-card   { background: white; border: 0.5px solid #E5E7EB; border-radius: 12px; padding: 24px; }
+.form-card-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
 .form-card-title { font-size: 15px; font-weight: 600; color: #111827; margin: 0 0 3px; }
 .form-card-sub   { font-size: 12px; color: #9CA3AF; margin: 0; }
 
-// ── Password strength ─────────────────────────────────────────────────────────
-.pwd-strength {
-  display: flex; align-items: center; gap: 10px; margin-top: 8px;
-}
-.strength-bars {
-  display: flex; gap: 4px; flex: 1;
-}
-.bar {
-  height: 4px; flex: 1; border-radius: 2px;
-  transition: background .3s;
-}
+.pwd-strength { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.strength-bars { display: flex; gap: 4px; flex: 1; }
+.bar { height: 4px; flex: 1; border-radius: 2px; transition: background .3s; }
 .strength-label { font-size: 11px; font-weight: 600; min-width: 40px; }
-
-// ── Password rules ────────────────────────────────────────────────────────────
-.pwd-rules {
-  background: #F9FAFB; border-radius: 10px;
-  padding: 14px 16px; margin-top: 16px;
-  border: 0.5px solid #E5E7EB;
-}
+.pwd-rules { background: #F9FAFB; border-radius: 10px; padding: 14px 16px; margin-top: 16px; border: 0.5px solid #E5E7EB; }
 .rules-title { font-size: 12px; font-weight: 600; color: #374151; margin: 0 0 10px; }
 .rules-list  { display: flex; flex-wrap: wrap; gap: 8px; }
 .rule {
@@ -630,8 +587,51 @@ onMounted(fetchProfile)
   &.rule-ok { color: #059669; }
 }
 
+// ── 2FA ───────────────────────────────────────────────────────────────────────
+.twofa-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  background: #F9FAFB; border: 0.5px solid #E5E7EB;
+  border-radius: 10px; padding: 16px 20px;
+  @media (max-width: 600px) { flex-direction: column; align-items: flex-start; }
+}
+.twofa-info { display: flex; flex-direction: column; gap: 6px; }
+.twofa-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 20px;
+  &.status-on  { background: #ECFDF5; color: #059669; }
+  &.status-off { background: #F3F4F6; color: #6B7280; }
+}
+.twofa-desc { font-size: 13px; color: #6B7280; margin: 0; max-width: 380px; }
+
+.twofa-confirm {
+  background: #EEF2FF; border: 1px solid #C7D2FE;
+  border-radius: 10px; padding: 18px 20px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.twofa-confirm-info {
+  display: flex; align-items: flex-start; gap: 10px;
+  p { font-size: 13.5px; color: #374151; margin: 0; line-height: 1.5; }
+  strong { color: #1E1B4B; }
+}
+.twofa-confirm-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.twofa-confirm-btns { display: flex; align-items: center; gap: 8px; }
+
+.otp-native-wrap { display: flex; flex-direction: column; gap: 5px; }
+.otp-label { font-size: 12px; font-weight: 600; color: #374151; }
+.otp-native {
+  width: 140px; height: 44px;
+  border: 1.5px solid #C7D2FE; border-radius: 10px;
+  background: #fff; padding: 0 14px;
+  font-size: 20px; font-weight: 700; color: #1E1B4B;
+  letter-spacing: 6px; text-align: center;
+  outline: none; transition: border-color .2s;
+  &:focus { border-color: #4F46E5; box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+  &::placeholder { color: #C7D2FE; letter-spacing: 4px; font-size: 16px; }
+}
+
 .mt-3 { margin-top: 12px; }
 .mt-4 { margin-top: 16px; }
 .mb-4 { margin-bottom: 16px; }
 .mb-5 { margin-bottom: 20px; }
+.my-6 { margin-top: 24px; margin-bottom: 24px; }
 </style>

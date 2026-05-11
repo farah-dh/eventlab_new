@@ -26,7 +26,13 @@ const router = createRouter({
   ],
 })
 
-const publicPages = ['/login', '/register', '/forgot-password']
+// Pages accessibles sans token
+const publicPages = [
+  '/login',
+  '/register',
+  '/forgot-password',
+  '/organizer/two-fa-verify',   // ← 2FA organizer pendant le login
+]
 
 function isTokenExpired(token: string): boolean {
   try {
@@ -40,9 +46,9 @@ function isTokenExpired(token: string): boolean {
 router.beforeEach((to: any, _from: any, next: any) => {
   const path: string = to.path
 
-  const accessToken = localStorage.getItem('access_token')
+  const accessToken    = localStorage.getItem('access_token')
   const organizerToken = localStorage.getItem('organizer_token')
-  const isPublic = publicPages.includes(path) || to.meta.public === true
+  const isPublic       = publicPages.includes(path) || to.meta.public === true
 
   if (accessToken && isTokenExpired(accessToken)) {
     localStorage.removeItem('access_token')
@@ -58,23 +64,9 @@ router.beforeEach((to: any, _from: any, next: any) => {
   }
 
   const validUserToken = localStorage.getItem('access_token')
-  const validOrgToken = localStorage.getItem('organizer_token')
+  const validOrgToken  = localStorage.getItem('organizer_token')
 
-  if (path.startsWith('/organizer')) {
-    if (!validOrgToken) {
-      next({ path: '/login', replace: true })
-      return
-    }
-    if (isTokenExpired(validOrgToken)) {
-      localStorage.removeItem('organizer_token')
-      localStorage.removeItem('organizer')
-      next({ path: '/login', replace: true })
-      return
-    }
-    next()
-    return
-  }
-
+  // ── Page publique → passe directement (avant tout autre check) ────────
   if (isPublic) {
     if (validOrgToken && !isTokenExpired(validOrgToken) && path === '/login') {
       next({ path: '/organizer/dashboard', replace: true })
@@ -97,11 +89,28 @@ router.beforeEach((to: any, _from: any, next: any) => {
     return
   }
 
+  // ── Routes organizer (authentifiées) ──────────────────────────────────
+  if (path.startsWith('/organizer')) {
+    if (!validOrgToken) {
+      next({ path: '/login', replace: true })
+      return
+    }
+    if (isTokenExpired(validOrgToken)) {
+      localStorage.removeItem('organizer_token')
+      localStorage.removeItem('organizer')
+      next({ path: '/login', replace: true })
+      return
+    }
+    next()
+    return
+  }
+
   if (!validUserToken && !validOrgToken) {
     next({ path: '/login', replace: true })
     return
   }
 
+  // ── Routes admin ──────────────────────────────────────────────────────
   if (path.startsWith('/admin')) {
     if (!validUserToken) {
       next({ path: '/login', replace: true })
@@ -120,6 +129,7 @@ router.beforeEach((to: any, _from: any, next: any) => {
     }
   }
 
+  // ── Routes user ───────────────────────────────────────────────────────
   if (path.startsWith('/user')) {
     if (!validUserToken) {
       next({ path: '/login', replace: true })

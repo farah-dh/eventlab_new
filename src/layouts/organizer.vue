@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 
-const route = useRoute()
+const route  = useRoute()
 const router = useRouter()
 
 const organizer = computed(() => {
@@ -25,26 +25,47 @@ const userInitials = computed(() => {
   return 'O'
 })
 
-// ─── CORRECTION : suppression du groupe Compte ───
+// ─── Navigation ───────────────────────────────────────────────────────────────
 const navGroups = [
   {
     label: 'Principal',
     items: [
       { to: '/organizer/dashboard', icon: 'tabler-layout-dashboard', title: 'Tableau de bord' },
-      { to: '/organizer/events',    icon: 'tabler-calendar-event',   title: 'Mes événements' },
-      { to: '/organizer/orders',    icon: 'tabler-ticket',           title: 'Réservations' },
+    ],
+  },
+  {
+    label: 'Événements',
+    items: [
+      { to: '/organizer/events',        icon: 'tabler-calendar-event', title: 'Mes événements' },
+      { to: '/organizer/events/create', icon: 'tabler-circle-plus',    title: 'Créer un événement' },
+    ],
+  },
+  {
+    label: 'Finances',
+    items: [
+      { to: '/organizer/finances',   icon: 'tabler-chart-bar',     title: 'Total des ventes' },
+      { to: '/organizer/withdrawal', icon: 'tabler-cash-banknote', title: "Retrait d'argent" },
+    ],
+  },
+  {
+    label: 'Réservations',
+    items: [
+      { to: '/organizer/orders', icon: 'tabler-ticket', title: 'Réservations' },
     ],
   },
 ]
 
 const pageTitle = computed(() => {
-  const titles: Record<string, string> = {
-    'organizer-dashboard': 'Tableau de bord',
-    'organizer-events':    'Mes événements',
-    'organizer-orders':    'Réservations',
-    'organizer-profile':   'Mon profil',
+  const map: Record<string, string> = {
+    'organizer-dashboard':     'Tableau de bord',
+    'organizer-events':        'Mes événements',
+    'organizer-events-create': 'Créer un événement',
+    'organizer-orders':        'Réservations',
+    'organizer-profile':       'Mon profil',
+    'organizer-finances':      'Total des ventes',
+    'organizer-withdrawal':    "Retrait d'argent",
   }
-  return titles[String(route.name)] || 'Dashboard'
+  return map[String(route.name)] || 'Dashboard'
 })
 
 const sidebarOpen         = ref(false)
@@ -53,13 +74,12 @@ const notificationsDialog = ref(false)
 const unreadCount         = ref(0)
 const notifications       = ref<any[]>([])
 
-// ─── Menu profil ───
+// ─── Menu profil ──────────────────────────────────────────────────────────────
 const profileMenuOpen = ref(false)
 const profileMenuRef  = ref<HTMLElement | null>(null)
 
 const toggleProfileMenu = () => { profileMenuOpen.value = !profileMenuOpen.value }
-
-const closeProfileMenu = (e: MouseEvent) => {
+const closeProfileMenu  = (e: MouseEvent) => {
   if (profileMenuRef.value && !profileMenuRef.value.contains(e.target as Node))
     profileMenuOpen.value = false
 }
@@ -100,6 +120,7 @@ const goToDashboard = () => {
     <!-- ══════ SIDEBAR ══════ -->
     <aside :class="['sidebar', { 'sidebar--open': sidebarOpen }]">
 
+      <!-- Brand -->
       <div class="sidebar-brand">
         <div class="brand-icon">
           <VIcon icon="tabler-calendar-event" color="white" size="18" />
@@ -110,6 +131,7 @@ const goToDashboard = () => {
         </div>
       </div>
 
+      <!-- Nav -->
       <nav class="sidebar-nav">
         <template v-for="group in navGroups" :key="group.label">
           <span class="nav-section">{{ group.label }}</span>
@@ -121,21 +143,24 @@ const goToDashboard = () => {
             active-class="nav-item--active"
             @click="sidebarOpen = false"
           >
-            <VIcon :icon="item.icon" size="16" />
+            <span class="nav-item-icon">
+              <VIcon :icon="item.icon" size="15" />
+            </span>
             {{ item.title }}
           </RouterLink>
         </template>
       </nav>
 
-      <!-- ─── CORRECTION : footer sans bouton déconnexion ─── -->
+      <!-- Footer -->
       <div class="sidebar-footer">
-        <div class="user-card">
+        <RouterLink to="/organizer/profile" class="user-card" @click="sidebarOpen = false">
           <div class="user-avatar">{{ userInitials }}</div>
           <div class="user-info">
             <span class="user-name">{{ userName }}</span>
             <span class="user-org">{{ orgName }}</span>
           </div>
-        </div>
+          <VIcon icon="tabler-settings" size="14" class="user-settings-icon" />
+        </RouterLink>
       </div>
     </aside>
 
@@ -216,23 +241,39 @@ const goToDashboard = () => {
 </template>
 
 <style scoped lang="scss">
-$sidebar-w: 240px;
-$topbar-h: 56px;
-$sidebar-bg: #111827;
+// ── Variables rose ────────────────────────────────────────────────────────────
+$pink-1:    #C8365F;
+$pink-2:    #A82248;
+$pink-soft: rgba(200, 54, 95, 0.15);
 
+$sidebar-w:  250px;
+$topbar-h:   56px;
+$sidebar-bg: #16050C;
+
+// ── Layout ────────────────────────────────────────────────────────────────────
 .org-layout { display: flex; min-height: 100vh; background: #F3F4F6; }
 
 .overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 99;
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 99;
   display: none;
   @media (max-width: 768px) { display: block; }
 }
 
+// ── Sidebar ───────────────────────────────────────────────────────────────────
 .sidebar {
   width: $sidebar-w; background: $sidebar-bg;
   display: flex; flex-direction: column;
   position: fixed; height: 100vh; left: 0; top: 0; z-index: 100;
   transition: transform .25s ease;
+  border-right: 1px solid rgba(200,54,95,0.12);
+
+  &::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 120% 40% at 50% 0%, rgba(200,54,95,0.18) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
   @media (max-width: 768px) {
     transform: translateX(-100%);
     &--open { transform: translateX(0); }
@@ -240,78 +281,142 @@ $sidebar-bg: #111827;
 }
 
 .sidebar-brand {
-  display: flex; align-items: center; gap: 10px;
-  padding: 20px 16px 16px;
-  border-bottom: 0.5px solid rgba(255,255,255,0.06);
-  .brand-icon { width: 34px; height: 34px; background: #4F46E5; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-  .brand-name { display: block; font-size: 15px; font-weight: 600; color: #F9FAFB; letter-spacing: -.2px; }
-  .brand-sub  { display: block; font-size: 11px; color: #6B7280; margin-top: 1px; }
+  display: flex; align-items: center; gap: 11px;
+  padding: 20px 16px 16px; position: relative; z-index: 1;
+  border-bottom: 1px solid rgba(200,54,95,0.12);
+
+  .brand-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, $pink-1, $pink-2);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; box-shadow: 0 4px 12px rgba(200,54,95,0.4);
+  }
+  .brand-name { display: block; font-size: 15px; font-weight: 700; color: #FFF0F5; letter-spacing: -.2px; }
+  .brand-sub  { display: block; font-size: 10.5px; color: rgba(200,54,95,0.6); margin-top: 1px; }
 }
 
-.sidebar-nav { flex: 1; padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; }
+.sidebar-nav {
+  flex: 1; padding: 14px 10px;
+  display: flex; flex-direction: column; gap: 1px;
+  overflow-y: auto; position: relative; z-index: 1;
+  &::-webkit-scrollbar { width: 3px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb { background: rgba(200,54,95,0.2); border-radius: 2px; }
+}
 
 .nav-section {
-  font-size: 10px; font-weight: 600; color: #4B5563;
-  text-transform: uppercase; letter-spacing: .8px;
-  padding: 10px 10px 4px; display: block;
-  &:first-child { padding-top: 4px; }
+  font-size: 9.5px; font-weight: 700;
+  color: rgba(200,54,95,0.45);
+  text-transform: uppercase; letter-spacing: 1px;
+  padding: 12px 10px 4px; display: block;
+  &:first-child { padding-top: 2px; }
 }
 
 .nav-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 9px 10px; border-radius: 7px;
-  color: #9CA3AF; text-decoration: none;
-  font-size: 13.5px; transition: all .15s;
-  &:hover { background: rgba(255,255,255,0.05); color: #E5E7EB; }
-  &--active { background: rgba(79,70,229,0.15); color: #818CF8; }
+  padding: 9px 10px; border-radius: 8px;
+  color: rgba(255,240,245,0.5); text-decoration: none;
+  font-size: 13.5px; font-weight: 500;
+  transition: all .15s; position: relative;
+
+  .nav-item-icon {
+    width: 28px; height: 28px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.04);
+    transition: all .15s; flex-shrink: 0;
+  }
+
+  &:hover {
+    background: rgba(200,54,95,0.08); color: #FFF0F5;
+    .nav-item-icon { background: rgba(200,54,95,0.12); }
+  }
+
+  &--active {
+    background: $pink-soft; color: #FFB3CF; font-weight: 600;
+    .nav-item-icon {
+      background: linear-gradient(135deg, $pink-1, $pink-2);
+      box-shadow: 0 3px 10px rgba(200,54,95,0.4); color: white;
+    }
+    &::before {
+      content: ''; position: absolute; left: 0; top: 50%;
+      transform: translateY(-50%);
+      width: 3px; height: 20px;
+      background: $pink-1; border-radius: 0 3px 3px 0;
+    }
+  }
 }
 
-.sidebar-footer { padding: 12px 10px; border-top: 0.5px solid rgba(255,255,255,0.06); }
+.sidebar-footer {
+  padding: 10px; border-top: 1px solid rgba(200,54,95,0.12);
+  position: relative; z-index: 1;
+}
 
 .user-card {
   display: flex; align-items: center; gap: 10px;
-  padding: 9px 10px; border-radius: 8px;
-  background: rgba(255,255,255,0.04);
+  padding: 10px; border-radius: 10px;
+  background: rgba(200,54,95,0.08);
+  border: 1px solid rgba(200,54,95,0.12);
+  text-decoration: none; cursor: pointer; transition: all .15s;
+  &:hover { background: rgba(200,54,95,0.14); border-color: rgba(200,54,95,0.25); }
 }
 
 .user-avatar {
-  width: 32px; height: 32px; border-radius: 50%; background: #4F46E5;
+  width: 32px; height: 32px; border-radius: 50%;
+  background: linear-gradient(135deg, $pink-1, $pink-2);
   display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 600; color: white; flex-shrink: 0;
+  font-size: 12px; font-weight: 700; color: white; flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(200,54,95,0.35);
 }
-.user-name { display: block; font-size: 13px; font-weight: 500; color: #E5E7EB; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.user-org  { display: block; font-size: 11px; color: #6B7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-info           { flex: 1; min-width: 0; }
+.user-name           { display: block; font-size: 12.5px; font-weight: 600; color: #FFF0F5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-org            { display: block; font-size: 11px; color: rgba(200,54,95,0.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-settings-icon  { color: rgba(200,54,95,0.4); flex-shrink: 0; }
 
-.org-main { flex: 1; margin-left: $sidebar-w; min-height: 100vh; display: flex; flex-direction: column; @media (max-width: 768px) { margin-left: 0; } }
+// ── Main ──────────────────────────────────────────────────────────────────────
+.org-main {
+  flex: 1; margin-left: $sidebar-w; min-height: 100vh;
+  display: flex; flex-direction: column;
+  @media (max-width: 768px) { margin-left: 0; }
+}
 
+// ── Topbar ────────────────────────────────────────────────────────────────────
 .topbar {
-  height: $topbar-h; background: white; border-bottom: 0.5px solid #E5E7EB;
+  height: $topbar-h; background: white;
+  border-bottom: 0.5px solid #F3E8ED;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 24px; position: sticky; top: 0; z-index: 50;
 }
 .topbar-left  { display: flex; align-items: center; gap: 14px; }
-.topbar-title { font-size: 15px; font-weight: 500; color: #111827; }
+.topbar-title { font-size: 15px; font-weight: 600; color: #1A0510; }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 
 .search-wrap {
   display: flex; align-items: center; gap: 8px;
-  background: #F9FAFB; border: 0.5px solid #E5E7EB;
+  background: #FFF8FA; border: 0.5px solid #F3D6E0;
   border-radius: 8px; padding: 6px 12px; transition: all .2s;
-  &:focus-within { background: white; border-color: #818CF8; box-shadow: 0 0 0 3px rgba(99,102,241,0.08); }
-  .search-icon  { color: #9CA3AF; flex-shrink: 0; }
-  .search-input { border: none; background: none; outline: none; font-size: 13px; color: #111827; width: 150px; &::placeholder { color: #9CA3AF; } }
+  &:focus-within {
+    background: white; border-color: $pink-1;
+    box-shadow: 0 0 0 3px rgba(200,54,95,0.08);
+  }
+  .search-icon  { color: rgba(200,54,95,0.4); flex-shrink: 0; }
+  .search-input {
+    border: none; background: none; outline: none;
+    font-size: 13px; color: #1A0510; width: 150px;
+    &::placeholder { color: rgba(200,54,95,0.35); }
+  }
   @media (max-width: 768px) { display: none; }
 }
 
 .icon-btn {
   position: relative; width: 34px; height: 34px; border-radius: 8px;
-  border: 0.5px solid #E5E7EB; background: white;
+  border: 0.5px solid #F3D6E0; background: white;
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: #6B7280; transition: all .15s;
-  &:hover { background: #F9FAFB; }
+  cursor: pointer; color: $pink-1; transition: all .15s;
+  &:hover { background: #FFF0F5; border-color: $pink-1; }
   .notif-dot {
     position: absolute; top: -3px; right: -3px;
-    background: #EF4444; color: white; font-size: 9px; font-weight: 700;
+    background: $pink-1; color: white; font-size: 9px; font-weight: 700;
     width: 16px; height: 16px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
   }
@@ -321,18 +426,20 @@ $sidebar-bg: #111827;
 
 .topbar-avatar {
   width: 34px; height: 34px; border-radius: 50%;
-  background: #4F46E5; border: 2px solid #E0E7FF;
+  background: linear-gradient(135deg, $pink-1, $pink-2);
+  border: 2px solid #F9D0DE;
   display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 700; color: white;
   cursor: pointer; transition: all .15s;
-  &:hover { background: #4338CA; transform: scale(1.05); }
+  box-shadow: 0 2px 8px rgba(200,54,95,0.3);
+  &:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(200,54,95,0.4); }
 }
 
 .profile-menu {
   position: absolute; top: calc(100% + 10px); right: 0;
   width: 240px; background: white;
-  border: 0.5px solid #E5E7EB; border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  border: 0.5px solid #F3D6E0; border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(125,18,53,0.12);
   overflow: hidden; z-index: 200;
   animation: menuSlide .15s ease;
 }
@@ -344,18 +451,20 @@ $sidebar-bg: #111827;
 
 .profile-menu-header {
   display: flex; align-items: center; gap: 12px;
-  padding: 14px 16px; background: #FAFAFA;
+  padding: 14px 16px; background: #FFF8FA;
+  border-bottom: 0.5px solid #F3D6E0;
 }
 .profile-menu-avatar {
   width: 38px; height: 38px; border-radius: 50%;
-  background: linear-gradient(135deg, #4F46E5, #8B5CF6);
+  background: linear-gradient(135deg, $pink-1, $pink-2);
   display: flex; align-items: center; justify-content: center;
   font-size: 14px; font-weight: 700; color: white; flex-shrink: 0;
+  box-shadow: 0 3px 10px rgba(200,54,95,0.35);
 }
-.profile-menu-name  { font-size: 13px; font-weight: 600; color: #111827; margin: 0 0 1px; }
-.profile-menu-org   { font-size: 11px; color: #6B7280; margin: 0 0 1px; }
+.profile-menu-name  { font-size: 13px; font-weight: 600; color: #1A0510; margin: 0 0 1px; }
+.profile-menu-org   { font-size: 11px; color: $pink-1; margin: 0 0 1px; font-weight: 500; }
 .profile-menu-email { font-size: 11px; color: #9CA3AF; margin: 0; }
-.profile-menu-divider { height: 0.5px; background: #F3F4F6; margin: 4px 0; }
+.profile-menu-divider { height: 0.5px; background: #F3D6E0; margin: 4px 0; }
 
 .profile-menu-item {
   display: flex; align-items: center; gap: 10px;
@@ -363,15 +472,15 @@ $sidebar-bg: #111827;
   border: none; background: none;
   font-size: 13px; color: #374151;
   cursor: pointer; transition: all .12s; text-align: left;
-  &:hover { background: #F9FAFB; color: #111827; }
+  &:hover { background: #FFF0F5; color: $pink-1; }
   &--danger { color: #EF4444; &:hover { background: #FEF2F2; color: #DC2626; } }
 }
 
 .burger {
   background: none; border: none; cursor: pointer; padding: 5px;
-  border-radius: 7px; color: #6B7280;
+  border-radius: 7px; color: $pink-1;
   display: flex; align-items: center; justify-content: center;
-  &:hover { background: #F3F4F6; }
+  &:hover { background: #FFF0F5; }
 }
 
 .org-content { flex: 1; padding: 28px 24px; }

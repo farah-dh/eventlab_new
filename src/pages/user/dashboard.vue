@@ -3,10 +3,16 @@ import { computed, onMounted, ref } from 'vue'
 import { useCartStore } from '@/stores/cart'
 import type { CartItem } from '@/stores/cart'
 
+// ✅ FIX 1 : layout utilisateur
+definePage({
+  meta: { layout: 'default' },
+})
+
 const router    = useRouter()
 const cartStore = useCartStore()
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001/api/v1'
+// ✅ FIX 2 : port 8000 au lieu de 8001
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1'
 const getToken = () => localStorage.getItem('access_token') || localStorage.getItem('token')
 
 const apiFetch = async (endpoint: string) => {
@@ -67,7 +73,6 @@ const totalSpent          = computed(() => orders.value.reduce((s, o) => s + Num
 const recentOrders        = computed(() => orders.value.slice(0, 5))
 const upcomingEvents      = computed(() => events.value.slice(0, 5))
 
-// ── Cart (types exacts CartItem) ──
 const cartItems    = computed((): CartItem[] => cartStore.items)
 const cartCount    = computed(() => cartStore.totalItems)
 const cartSubtotal = computed(() => cartStore.totalPrice)
@@ -80,9 +85,9 @@ const clearCart   = ()               => { cartStore.clearCart(); showClearDialog
 
 const applyPromo = () => {
   const code = promoCode.value.trim().toUpperCase()
-  if (code === 'EVENTLAB10')      { discount.value = cartSubtotal.value * 0.1; promoSuccess.value = true; promoMessage.value = '🎉 -10% appliqué !' }
-  else if (code === 'WELCOME')    { discount.value = 5; promoSuccess.value = true; promoMessage.value = '🎉 -5 DT appliqué !' }
-  else                            { discount.value = 0; promoSuccess.value = false; promoMessage.value = '❌ Code invalide' }
+  if (code === 'EVENTLAB10')   { discount.value = cartSubtotal.value * 0.1; promoSuccess.value = true; promoMessage.value = '🎉 -10% appliqué !' }
+  else if (code === 'WELCOME') { discount.value = 5; promoSuccess.value = true; promoMessage.value = '🎉 -5 DT appliqué !' }
+  else                         { discount.value = 0; promoSuccess.value = false; promoMessage.value = '❌ Code invalide' }
 }
 
 const quickActions = [
@@ -93,10 +98,10 @@ const quickActions = [
 ]
 
 const kpis = computed(() => [
-  { label: 'Réservations',  value: totalOrders.value,                  icon: 'tabler-ticket',  color: '#E91E8C', bg: 'rgba(233,30,140,0.08)', sub: pendingOrders.value > 0 ? `${pendingOrders.value} en attente` : 'Aucune en attente' },
-  { label: 'Sauvegardés',   value: totalSaved.value,                   icon: 'tabler-heart',   color: '#FF5722', bg: 'rgba(255,87,34,0.08)',  sub: 'Événements favoris' },
-  { label: 'Notifications', value: unreadNotifications.value,          icon: 'tabler-bell',    color: '#FF9800', bg: 'rgba(255,152,0,0.08)',  sub: unreadNotifications.value > 0 ? 'Non lues' : 'Tout lu' },
-  { label: 'Dépensé',       value: `${totalSpent.value.toFixed(0)} DT`, icon: 'tabler-wallet', color: '#4CAF50', bg: 'rgba(76,175,80,0.08)',  sub: 'Total cumulé' },
+  { label: 'Réservations',  value: totalOrders.value,                   icon: 'tabler-ticket',  color: '#E91E8C', bg: 'rgba(233,30,140,0.08)', sub: pendingOrders.value > 0 ? `${pendingOrders.value} en attente` : 'Aucune en attente' },
+  { label: 'Sauvegardés',   value: totalSaved.value,                    icon: 'tabler-heart',   color: '#FF5722', bg: 'rgba(255,87,34,0.08)',  sub: 'Événements favoris' },
+  { label: 'Notifications', value: unreadNotifications.value,           icon: 'tabler-bell',    color: '#FF9800', bg: 'rgba(255,152,0,0.08)',  sub: unreadNotifications.value > 0 ? 'Non lues' : 'Tout lu' },
+  { label: 'Dépensé',       value: `${totalSpent.value.toFixed(0)} DT`, icon: 'tabler-wallet',  color: '#4CAF50', bg: 'rgba(76,175,80,0.08)',  sub: 'Total cumulé' },
 ])
 
 function formatDate(d: string | null) {
@@ -107,12 +112,11 @@ function formatPrice(p: any) {
   return (p === null || p === undefined) ? 'Gratuit' : `${Number(p).toFixed(3)} DT`
 }
 function getOrderStatus(status: any) {
-  // Backend : payment_status = 0 PENDING, 1 PAID, 2 FAILED, 3 REFUNDED
   const c: Record<string, any> = {
-    '0':       { label: 'En attente', color: 'warning', icon: 'tabler-clock' },
-    '1':       { label: 'Payée ✅',   color: 'success', icon: 'tabler-check' },
-    '2':       { label: 'Échouée',    color: 'error',   icon: 'tabler-x' },
-    '3':       { label: 'Remboursée', color: 'info',    icon: 'tabler-refresh' },
+    '0':         { label: 'En attente', color: 'warning', icon: 'tabler-clock' },
+    '1':         { label: 'Payée ✅',   color: 'success', icon: 'tabler-check' },
+    '2':         { label: 'Échouée',    color: 'error',   icon: 'tabler-x' },
+    '3':         { label: 'Remboursée', color: 'info',    icon: 'tabler-refresh' },
     'pending':   { label: 'En attente', color: 'warning', icon: 'tabler-clock' },
     'paid':      { label: 'Payée ✅',   color: 'success', icon: 'tabler-check' },
     'confirmed': { label: 'Confirmée',  color: 'success', icon: 'tabler-circle-check' },

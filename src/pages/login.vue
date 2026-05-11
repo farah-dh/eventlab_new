@@ -34,21 +34,24 @@ onMounted(() => {
 })
 
 const handleLogin = async () => {
-  if (!email.value || !password.value) { error.value='Veuillez remplir tous les champs'; return }
+  if (!email.value || !password.value) { error.value = 'Veuillez remplir tous les champs'; return }
   error.value = ''
-  let result: any
+
   if (role.value === 'organizer') {
-    result = await authStore.loginOrganizer(email.value, password.value)
-    if (result.success) return router.push('/organizer/dashboard')
+    const result = await authStore.loginOrganizer(email.value, password.value)
+    console.log('[DEBUG] loginOrganizer result:', JSON.stringify(result))
+    if (result.success)     return router.push('/organizer/dashboard')
+    if (result.requires2FA) return router.push('/organizer/two-fa-verify?oid=' + result.organizerId)
+    error.value = result.message || 'Email ou mot de passe incorrect'
   } else {
-    result = await authStore.login(email.value, password.value)
+    const result = await authStore.login(email.value, password.value)
     if (result.success) {
       if (authStore.isAdmin) return router.push('/admin/dashboard')
       return router.push('/user/dashboard')
     }
+    if (result.requires2FA) return router.push('/two-fa-verify?uid=' + result.userId)
+    error.value = result.message || 'Email ou mot de passe incorrect'
   }
-  if (result.requires2FA) { error.value='Entrez votre code 2FA pour continuer'; return }
-  error.value = result.message || 'Email ou mot de passe incorrect'
 }
 </script>
 
@@ -162,7 +165,6 @@ const handleLogin = async () => {
       </main>
     </div>
 
-    <!-- ✅ footer-wrap pour passer au-dessus du .scene fixed -->
     <div class="footer-wrap">
       <AppFooter />
     </div>
@@ -269,10 +271,7 @@ const handleLogin = async () => {
 .reg{text-align:center;font-size:13.5px;color:#8A5060;}
 .reg a{color:var(--p1);font-weight:700;text-decoration:none;transition:color .2s;}
 .reg a:hover{color:var(--p3);}
-
-/* ✅ FIX FOOTER — passe au-dessus du .scene fixed */
 .footer-wrap { position: relative; z-index: 10; }
-
 @media(max-width:1100px){.lp{grid-template-columns:1fr;padding:100px 24px 40px;min-height:auto;gap:32px;}.hero{padding-top:0;}.hero-logo{margin-bottom:32px;}.hero-testi{display:none;}.hero-stats{max-width:100%;}.card{padding:36px 28px;}.hero-h1{font-size:40px;}}
 @media(max-width:600px){.hero{text-align:center;}.hero-logo{justify-content:center;}.hero-badge{margin:0 auto 20px;}.hero-p{margin:0 auto 32px;}.hero-stats{padding:16px;}.hero-stat strong{font-size:22px;}.card{padding:28px 20px;border-radius:20px;}.card-title{font-size:28px;}}
 </style>

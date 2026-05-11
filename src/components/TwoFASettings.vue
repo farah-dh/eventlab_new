@@ -5,7 +5,6 @@ import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 
-// ── state ──────────────────────────────────────────────────────────────────
 type Step = 'idle' | 'sending' | 'otp' | 'done'
 
 const enabled  = ref(false)
@@ -20,7 +19,7 @@ let cdTimer: ReturnType<typeof setInterval> | null = null
 
 const otp = () => digits.value.join('')
 
-const apiBase = import.meta.env.VITE_API_URL
+const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001/api/v1'
 
 function authHeaders() {
   return { Authorization: `Bearer ${authStore.token}` }
@@ -28,12 +27,11 @@ function authHeaders() {
 
 onMounted(async () => {
   try {
-    const data = await $fetch(`${apiBase}/api/v1/auth/2fa/status/`, { headers: authHeaders() })
-    enabled.value = data.data['2fa_enabled']
+    const data = await $fetch(`${apiBase}/auth/2fa/status/`, { headers: authHeaders() })
+    enabled.value = (data as any).data['2fa_enabled']
   } catch { /* silent */ }
 })
 
-// ── helpers ────────────────────────────────────────────────────────────────
 function showMsg(msg: string, err = false) {
   message.value = msg
   isError.value = err
@@ -71,12 +69,11 @@ function onKeydown(i: number, e: KeyboardEvent) {
   }
 }
 
-// ── actions ────────────────────────────────────────────────────────────────
 async function requestEnable() {
   loading.value = true
   showMsg('')
   try {
-    await $fetch(`${apiBase}/api/v1/auth/2fa/enable/`, {
+    await $fetch(`${apiBase}/auth/2fa/enable/`, {
       method: 'POST', headers: authHeaders(),
     })
     step.value = 'otp'
@@ -95,8 +92,9 @@ async function confirmEnable() {
   loading.value = true
   showMsg('')
   try {
-    await $fetch(`${apiBase}/api/v1/auth/2fa/enable/confirm/`, {
-      method: 'POST', headers: authHeaders(),
+    await $fetch(`${apiBase}/auth/2fa/enable/confirm/`, {
+      method: 'POST',
+      headers: authHeaders(),
       body: { otp: otp() },
     })
     enabled.value = true
@@ -114,7 +112,7 @@ async function requestDisable() {
   loading.value = true
   showMsg('')
   try {
-    await $fetch(`${apiBase}/api/v1/auth/2fa/disable/`, {
+    await $fetch(`${apiBase}/auth/2fa/disable/`, {
       method: 'POST', headers: authHeaders(),
     })
     step.value = 'otp'
@@ -133,8 +131,9 @@ async function confirmDisable() {
   loading.value = true
   showMsg('')
   try {
-    await $fetch(`${apiBase}/api/v1/auth/2fa/disable/`, {
-      method: 'POST', headers: authHeaders(),
+    await $fetch(`${apiBase}/auth/2fa/disable/`, {
+      method: 'POST',
+      headers: authHeaders(),
       body: { otp: otp() },
     })
     enabled.value = false
@@ -151,8 +150,8 @@ async function confirmDisable() {
 async function resend() {
   if (resendCd.value > 0) return
   const url = enabled.value
-    ? `${apiBase}/api/v1/auth/2fa/disable/`
-    : `${apiBase}/api/v1/auth/2fa/enable/`
+    ? `${apiBase}/auth/2fa/disable/`
+    : `${apiBase}/auth/2fa/enable/`
   try {
     await $fetch(url, { method: 'POST', headers: authHeaders() })
     startCountdown(60)
@@ -171,7 +170,6 @@ function cancel() {
 
 <template>
   <div class="tfa">
-    <!-- Header row -->
     <div class="tfa-head">
       <div class="tfa-icon" :class="{ on: enabled }">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -188,7 +186,6 @@ function cancel() {
       </div>
     </div>
 
-    <!-- Message banner -->
     <transition name="msg">
       <div v-if="message" class="msg-box" :class="isError ? 'msg-err' : 'msg-ok'">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -199,7 +196,6 @@ function cancel() {
       </div>
     </transition>
 
-    <!-- ── IDLE: show toggle button ── -->
     <template v-if="step === 'idle' || step === 'done'">
       <div class="tfa-row">
         <div class="tfa-explain">
@@ -218,38 +214,30 @@ function cancel() {
           :disabled="loading"
           @click="enabled ? requestDisable() : requestEnable()"
         >
-          <span v-if="!loading">
-            {{ enabled ? 'Désactiver la 2FA' : 'Activer la 2FA' }}
-          </span>
+          <span v-if="!loading">{{ enabled ? 'Désactiver la 2FA' : 'Activer la 2FA' }}</span>
           <span v-else class="dots"><i/><i/><i/></span>
         </button>
       </div>
     </template>
 
-    <!-- ── OTP step ── -->
     <template v-if="step === 'otp'">
       <div class="otp-section">
         <p class="otp-hint">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
           Entrez le code à 6 chiffres reçu par email
         </p>
-
         <div class="otp-wrap">
           <input
             v-for="(_, i) in digits" :key="i"
             :ref="el => { if (el) inputs[i] = el as HTMLInputElement }"
             v-model="digits[i]"
-            class="otp-box"
-            :class="{ filled: digits[i] }"
-            type="text"
-            inputmode="numeric"
-            maxlength="6"
+            class="otp-box" :class="{ filled: digits[i] }"
+            type="text" inputmode="numeric" maxlength="6"
             autocomplete="one-time-code"
             @input="onInput(i, $event)"
             @keydown="onKeydown(i, $event)"
           />
         </div>
-
         <div class="otp-actions">
           <button class="tfa-btn btn-enable" :disabled="loading || otp().length < 6"
             @click="enabled ? confirmDisable() : confirmEnable()">
@@ -258,7 +246,6 @@ function cancel() {
           </button>
           <button class="tfa-btn btn-ghost" @click="cancel">Annuler</button>
         </div>
-
         <div class="resend">
           <span>Pas reçu le code ?</span>
           <button class="resend-btn" :disabled="resendCd > 0" @click="resend">
@@ -274,7 +261,6 @@ function cancel() {
 <style scoped>
 :root{--p1:#C8365F;--p2:#A82248;--p3:#7D1235;--font-b:'Plus Jakarta Sans',sans-serif;}
 .tfa{background:#fff;border:1.5px solid rgba(200,54,95,.12);border-radius:20px;padding:26px 28px;font-family:var(--font-b);display:flex;flex-direction:column;gap:16px;}
-/* Header */
 .tfa-head{display:flex;align-items:flex-start;gap:14px;}
 .tfa-icon{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;flex-shrink:0;background:rgba(200,54,95,.07);border:1.5px solid rgba(200,54,95,.15);color:#C8365F;transition:all .3s;}
 .tfa-icon.on{background:rgba(200,54,95,.12);border-color:rgba(200,54,95,.3);}
@@ -284,16 +270,13 @@ function cancel() {
 .tfa-badge{padding:5px 12px;border-radius:100px;font-size:11.5px;font-weight:700;white-space:nowrap;flex-shrink:0;}
 .badge-on{background:rgba(16,185,129,.1);color:#059669;border:1px solid rgba(16,185,129,.2);}
 .badge-off{background:rgba(200,54,95,.07);color:#C8365F;border:1px solid rgba(200,54,95,.15);}
-/* Message */
 .msg-box{display:flex;align-items:center;gap:8px;padding:11px 14px;border-radius:10px;font-size:13px;}
 .msg-ok{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;}
 .msg-err{background:#fff1f2;color:#be123c;border:1px solid #fecdd3;}
 .msg-enter-active,.msg-leave-active{transition:all .3s;}
 .msg-enter-from,.msg-leave-to{opacity:0;transform:translateY(-6px);}
-/* Row */
 .tfa-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;}
 .tfa-explain{display:flex;align-items:center;gap:7px;font-size:13px;color:#7A4A5A;}
-/* Buttons */
 .tfa-btn{padding:11px 22px;border-radius:11px;font-family:var(--font-b);font-size:13.5px;font-weight:700;cursor:pointer;border:none;transition:all .22s;white-space:nowrap;}
 .btn-enable{background:#C8365F;color:#fff;box-shadow:0 4px 16px rgba(200,54,95,.3);}
 .btn-enable:hover:not(:disabled){background:#A82248;transform:translateY(-1px);}
@@ -302,7 +285,6 @@ function cancel() {
 .btn-ghost{background:rgba(0,0,0,.04);color:#7A4A5A;border:1.5px solid rgba(0,0,0,.08);}
 .btn-ghost:hover{background:rgba(0,0,0,.07);}
 .tfa-btn:disabled{opacity:.5;cursor:not-allowed;transform:none;}
-/* OTP section */
 .otp-section{display:flex;flex-direction:column;gap:14px;}
 .otp-hint{display:flex;align-items:center;gap:7px;font-size:13px;color:#7A4A5A;}
 .otp-wrap{display:flex;gap:8px;}
@@ -311,12 +293,10 @@ function cancel() {
 .otp-box.filled{border-color:#A82248;color:#C8365F;}
 .otp-actions{display:flex;gap:10px;}
 .otp-actions .tfa-btn{flex:1;}
-/* Resend */
 .resend{display:flex;align-items:center;gap:6px;font-size:12.5px;color:#8A5060;}
 .resend-btn{background:none;border:none;color:#C8365F;font-family:var(--font-b);font-size:12.5px;font-weight:700;cursor:pointer;padding:0;transition:color .2s;}
 .resend-btn:hover:not(:disabled){color:#7D1235;}
 .resend-btn:disabled{color:#C8A0B0;cursor:not-allowed;}
-/* Dots loader */
 .dots{display:inline-flex;gap:4px;}
 .dots i{display:block;width:6px;height:6px;border-radius:50%;background:currentColor;animation:db 1s infinite;font-style:normal;}
 .dots i:nth-child(2){animation-delay:.15s;}

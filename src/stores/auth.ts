@@ -15,7 +15,6 @@ export const useAuthStore = defineStore('auth', () => {
     !!orgToken.value || user.value?.is_organizer === true
   )
 
-  // ── Login Utilisateur / Admin ──────────────────────────
   async function login(email: string, password: string) {
     isLoading.value = true
     try {
@@ -24,98 +23,170 @@ export const useAuthStore = defineStore('auth', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       })
-
-      const json = await res.json()
+      const json    = await res.json()
       const payload = json.data || json
-
-      // ✅ 2FA required
-      if (payload['2fa_required']) {
+      if (payload['2fa_required'])
         return { success: false, requires2FA: true, userId: payload.user_id }
-      }
-
-      if (!res.ok) {
-        return {
-          success: false,
-          message: json.detail || json.message || 'Email ou mot de passe incorrect',
-        }
-      }
-
+      if (!res.ok)
+        return { success: false, message: json.detail || json.message || 'Email ou mot de passe incorrect' }
       const accessToken = payload.access || payload.token
       const userData    = payload.user || null
-
-      token.value = accessToken
-      user.value  = userData
+      token.value    = accessToken
+      user.value     = userData
+      orgToken.value = null
       localStorage.setItem('access_token', accessToken)
       localStorage.setItem('refresh_token', payload.refresh || '')
       localStorage.setItem('user', JSON.stringify(userData))
-
+      localStorage.removeItem('organizer_token')
+      localStorage.removeItem('organizer_refresh')
+      localStorage.removeItem('organizer')
       return { success: true }
-
-    } catch (err) {
+    } catch {
       return { success: false, message: 'Impossible de se connecter au serveur.' }
     } finally {
       isLoading.value = false
     }
   }
 
-  // ── Login Organisateur ────────────────────────────────
   async function loginOrganizer(email: string, password: string) {
     isLoading.value = true
     try {
-      const res = await fetch('/api/v1/auth/organizer-login/', {
+      const res = await fetch('/api/v1/auth/organizer/login/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       })
-
-      const json = await res.json()
-
-      if (!res.ok) {
-        return {
-          success: false,
-          message: json.detail || json.message || 'Email ou mot de passe incorrect',
-        }
-      }
-
-      const payload     = json.data || json
-      const accessToken = payload.access || payload.token
-
-      if (!accessToken) {
-        return { success: false, message: 'Token manquant dans la réponse du serveur.' }
-      }
-
+      const json    = await res.json()
+      const payload = json.data || json
+      if (payload['2fa_required'])
+        return { success: false, requires2FA: true, organizerId: payload.organizer_id }
+      if (!res.ok)
+        return { success: false, message: json.detail || json.message || 'Email ou mot de passe incorrect' }
+      const accessToken   = payload.access || payload.token
       const organizerData = payload.organizer || payload.user || null
-      const userData = organizerData
-        ? { ...organizerData, is_organizer: true }
-        : { is_organizer: true }
-
+      const userData      = organizerData ? { ...organizerData, is_organizer: true } : { is_organizer: true }
       orgToken.value = accessToken
       user.value     = userData
+      token.value    = null
       localStorage.setItem('organizer_token', accessToken)
       localStorage.setItem('organizer_refresh', payload.refresh || '')
       localStorage.setItem('user', JSON.stringify(userData))
-
+      localStorage.setItem('organizer', JSON.stringify(organizerData || {}))
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
       return { success: true }
-
-    } catch (err) {
+    } catch {
       return { success: false, message: 'Impossible de se connecter au serveur.' }
     } finally {
       isLoading.value = false
     }
   }
 
-  // ── Logout ────────────────────────────────────────────
+  async function verifyOrganizer2FA(organizerId: number, otp: string) {
+    try {
+      const res = await fetch('/api/v1/auth/organizer/2fa/verify/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizer_id: organizerId, otp }),
+      })
+      const json    = await res.json()
+      if (!res.ok) return { success: false, message: json.message || 'Code incorrect.' }
+      const payload       = json.data || json
+      const organizerData = payload.organizer || null
+      const userData      = organizerData ? { ...organizerData, is_organizer: true } : { is_organizer: true }
+      orgToken.value = payload.access
+      user.value     = userData
+      token.value    = null
+      localStorage.setItem('organizer_token', payload.access)
+      localStorage.setItem('organizer_refresh', payload.refresh || '')
+      localStorage.setItem('user', JSON.stringify(userData))
+      localStorage.setItem('organizer', JSON.stringify(organizerData || {}))
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      return { success: true }
+    } catch {
+      return { success: false, message: 'Erreur de connexion.' }
+    }
+  }
+
+  async function resendOrganizer2FA(organizerId: number) {
+    try {
+      const res = await fetch('/api/v1/auth/organizer/2fa/resend/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizer_id: organizerId }),
+      })
+      const json = await res.json()
+      if (!res.ok) return { success: false, message: json.message || 'Erreur.' }
+      return { success: true }
+    } catch {
+      return { success: false, message: 'Erreur de connexion.' }
+    }
+  }
+
+  async function getOrganizer2FAStatus() {
+    try {
+      const res = await fetch('/api/v1/auth/organizer/2fa/status/', {
+        headers: { Authorization: `Bearer ${orgToken.value}` },
+      })
+      const json = await res.json()
+      return { enabled: json.data?.['2fa_enabled'] ?? false }
+    } catch {
+      return { enabled: false }
+    }
+  }
+
+  async function enableOrganizer2FA() {
+    try {
+      const res = await fetch('/api/v1/auth/organizer/2fa/enable/', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${orgToken.value}` },
+      })
+      const json = await res.json()
+      if (!res.ok) return { success: false, message: json.message || 'Erreur.' }
+      return { success: true }
+    } catch {
+      return { success: false, message: 'Erreur de connexion.' }
+    }
+  }
+
+  async function confirmEnableOrganizer2FA(otp: string) {
+    try {
+      const res = await fetch('/api/v1/auth/organizer/2fa/enable/confirm/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${orgToken.value}` },
+        body: JSON.stringify({ otp }),
+      })
+      const json = await res.json()
+      if (!res.ok) return { success: false, message: json.message || 'Code incorrect.' }
+      return { success: true }
+    } catch {
+      return { success: false, message: 'Erreur de connexion.' }
+    }
+  }
+
+  async function disableOrganizer2FA(otp?: string) {
+    try {
+      const res = await fetch('/api/v1/auth/organizer/2fa/disable/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${orgToken.value}` },
+        body: JSON.stringify(otp ? { otp } : {}),
+      })
+      const json = await res.json()
+      if (!res.ok) return { success: false, message: json.message || 'Code incorrect.' }
+      return { success: true }
+    } catch {
+      return { success: false, message: 'Erreur de connexion.' }
+    }
+  }
+
   async function logout() {
     try {
       await fetch('/api/v1/auth/logout/', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token.value || orgToken.value}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token.value || orgToken.value}` },
       })
-    } catch (_) {}
-
+    } catch {}
     token.value    = null
     orgToken.value = null
     user.value     = null
@@ -123,10 +194,10 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('refresh_token')
     localStorage.removeItem('organizer_token')
     localStorage.removeItem('organizer_refresh')
+    localStorage.removeItem('organizer')
     localStorage.removeItem('user')
   }
 
-  // ── Forgot Password ───────────────────────────────────
   async function forgotPassword(email: string): Promise<void> {
     const res = await fetch('/api/v1/auth/password-reset/', {
       method: 'POST',
@@ -142,7 +213,6 @@ export const useAuthStore = defineStore('auth', () => {
     throw new Error(msg)
   }
 
-  // ── Reset Password ────────────────────────────────────
   async function resetPassword(resetToken: string, password: string): Promise<void> {
     const res = await fetch('/api/v1/auth/password-reset/confirm/', {
       method: 'POST',
@@ -157,8 +227,6 @@ export const useAuthStore = defineStore('auth', () => {
     } catch {}
     throw new Error(msg)
   }
-
-  // ── 2FA ───────────────────────────────────────────────
 
   async function verify2FA(userId: number, otp: string) {
     try {
@@ -226,10 +294,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const res = await fetch('/api/v1/auth/2fa/enable/confirm/', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token.value}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token.value}` },
         body: JSON.stringify({ otp }),
       })
       const json = await res.json()
@@ -244,10 +309,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const res = await fetch('/api/v1/auth/2fa/disable/', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token.value}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token.value}` },
         body: JSON.stringify(otp ? { otp } : {}),
       })
       const json = await res.json()
@@ -265,5 +327,7 @@ export const useAuthStore = defineStore('auth', () => {
     forgotPassword, resetPassword,
     verify2FA, resend2FA, get2FAStatus,
     enable2FA, confirmEnable2FA, disable2FA,
+    verifyOrganizer2FA, resendOrganizer2FA, getOrganizer2FAStatus,
+    enableOrganizer2FA, confirmEnableOrganizer2FA, disableOrganizer2FA,
   }
 })

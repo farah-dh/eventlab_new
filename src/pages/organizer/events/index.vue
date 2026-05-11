@@ -28,11 +28,6 @@ const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
   return res.json()
 }
 
-const organizer = computed(() => {
-  try { return JSON.parse(localStorage.getItem('organizer') || '{}') }
-  catch { return {} }
-})
-
 const isLoading    = ref(true)
 const isSaving     = ref(false)
 const isDeleting   = ref(false)
@@ -54,10 +49,9 @@ const showError = (msg: string) => {
   setTimeout(() => errorMessage.value = '', 5000)
 }
 
+// ✅ CORRECTION : suppression du filtre organizer_name qui bloquait l'affichage
 const filteredEvents = computed(() => {
-  let list = events.value.filter((e: any) =>
-    e.organizer_name === organizer.value.organization_name
-  )
+  let list = [...events.value]
   if (search.value)
     list = list.filter(e => e.title?.toLowerCase().includes(search.value.toLowerCase()))
   if (filterStatus.value === 'active')   list = list.filter(e => e.status === true)
@@ -86,7 +80,6 @@ const editingEvent = ref<any>(null)
 const formError    = ref('')
 const activeTab    = ref('info')
 
-// ─── Tous les champs compatibles avec le backend ───
 const emptyForm = () => ({
   title:             '',
   short_description: '',
@@ -108,8 +101,11 @@ const form = ref(emptyForm())
 const dialogTitle = computed(() => editingEvent.value ? "Modifier l'événement" : 'Créer un événement')
 
 const openCreate = () => {
-  editingEvent.value = null; form.value = emptyForm()
-  formError.value = ''; activeTab.value = 'info'; showDialog.value = true
+  editingEvent.value = null
+  form.value = emptyForm()
+  formError.value = ''
+  activeTab.value = 'info'
+  showDialog.value = true
 }
 
 const openEdit = (event: any) => {
@@ -131,7 +127,9 @@ const openEdit = (event: any) => {
     status:            event.status            ?? true,
     step:              event.step              || 0,
   }
-  formError.value = ''; activeTab.value = 'info'; showDialog.value = true
+  formError.value = ''
+  activeTab.value = 'info'
+  showDialog.value = true
 }
 
 const toDateOnly = (val: string) => val ? val.split('T')[0] : ''
@@ -224,8 +222,10 @@ const isUploadingGallery = ref(false)
 const galleryError       = ref('')
 
 const openGallery = (event: any) => {
-  galleryEvent.value = event; galleryImageUrl.value = ''
-  galleryError.value = ''; showGalleryDialog.value = true
+  galleryEvent.value = event
+  galleryImageUrl.value = ''
+  galleryError.value = ''
+  showGalleryDialog.value = true
 }
 
 const uploadGallery = async () => {
@@ -339,10 +339,8 @@ const formatDate     = (d: string) => {
   if (!d) return '-'
   return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
 }
-const getStatusColor = (s: boolean) => s ? 'success' : 'default'
 const getStatusLabel = (s: boolean) => s ? 'Actif' : 'Inactif'
 const getTypeLabel   = (t: number)  => t === 1 ? 'Payant' : 'Gratuit'
-const getTypeColor   = (t: number)  => t === 1 ? 'primary' : 'success'
 
 onMounted(fetchAll)
 </script>
